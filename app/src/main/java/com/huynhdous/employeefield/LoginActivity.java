@@ -3637,6 +3637,17 @@ public final class LoginActivity extends Activity {
             when = " on " + java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy").withZone(java.time.ZoneId.systemDefault()).format(instant);
         } catch (Exception ignored) {
         }
+        // Do Not Call is a hard stop, not a warning: the server rejects starting this door anyway
+        // (D2dDisposition::startForEmployeeToken()), so offering "Continue Anyway" would only lead to an error.
+        if ("do_not_call".equals(lead.optString("status", ""))) {
+            AlertDialog blocked = new AlertDialog.Builder(this)
+                    .setCustomTitle(Theme.dialogTitle(this, "Do Not Call", Theme.ERROR))
+                    .setMessage((address.isEmpty() ? "This house" : address) + " was marked Do Not Call" + when + ".\n\nDo not knock this door. If the earlier outcome was a mistake, ask your manager to correct it.")
+                    .setPositiveButton("OK", null)
+                    .show();
+            Theme.styleDialog(blocked, Theme.ERROR);
+            return;
+        }
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setCustomTitle(Theme.dialogTitle(this, "Already " + statusLabel, Theme.WARNING))
                 .setMessage((address.isEmpty() ? "This house" : address) + " was already marked " + statusLabel + when + ". Knocking again may annoy the homeowner.\n\nOnly continue if this is genuinely a different unit, or the earlier outcome was wrong.")
