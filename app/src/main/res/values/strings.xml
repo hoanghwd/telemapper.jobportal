@@ -1,0 +1,22 @@
+<resources>
+    <string name="app_name">Job Portal Telemapper</string>
+    <string name="brand">TELEMAPER</string>
+    <string name="welcome">Welcome back.</string>
+    <string name="subtitle">Sign in to your employee account.</string>
+    <string name="email_label">Username</string>
+    <string name="email_hint">Your employee username</string>
+    <string name="password_label">Password</string>
+    <string name="password_hint">Enter your password</string>
+    <string name="show_password">Show password</string>
+    <string name="sign_in">Sign In</string>
+    <string name="help">Need help signing in?</string>
+    <string name="help_message">Contact your manager to get access to your employee account.</string>
+    <string name="tracking_title">Your work location</string>
+    <string name="tracking_message">After sign-in and permission approval, your work location is shared with recruiters about every 30 seconds. Sign out stops tracking.</string>
+    <string name="prototype">Location tracking starts after sign-in and permission approval</string>
+    <string name="email_error">Enter your employee username.</string>
+    <string name="password_error">Enter your password.</string>
+    <string name="preview_title">Login screen is ready</string>
+    <string name="preview_message">The employee login service is not connected yet. No credentials were sent or saved, and location tracking has not started.</string>
+    <string name="ok">Got it</string>
+</resources>

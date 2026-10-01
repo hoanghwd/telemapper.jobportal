@@ -1,0 +1,27 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.huynhdous.employeefield'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.huynhdous.employeefield'
+        minSdk 26
+        targetSdk 35
+        versionCode 3
+        versionName '0.3.0'
+        buildConfigField "int", "EMPLOYEE_POLLING_PER_MIN", "${project.findProperty('EMPLOYEE_POLLING_PER_MIN') ?: 1}"
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildFeatures {
+        buildConfig true
+    }
+}
+dependencies {
+    // Only for FileProvider (secure file:// -> content:// URIs for camera capture); no other AndroidX libs used.
+    implementation 'androidx.core:core:1.13.1'
+    // Plain JVM unit tests (app/src/test) -- no device/emulator, no Robolectric; only for pure logic
+    // with no Android framework dependency, like DispositionQueue's drain-outcome decision.
+    testImplementation 'junit:junit:4.13.2'
+}
