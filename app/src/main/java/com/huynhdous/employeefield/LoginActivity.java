@@ -95,6 +95,9 @@ public final class LoginActivity extends Activity {
     private long activeDoorStartedMs;
     private Double activeDoorLat;
     private Double activeDoorLon;
+    /** The house the rep typed when GPS couldn't tell neighbours apart; pre-fills the start dialog so the
+     * server resolves the same house at start as it did at check time. Cleared at the start of each attempt. */
+    private String pendingConfirmedAddress;
     private android.net.Uri pendingDoorsPhotoUri;
     private File pendingDoorsPhotoFile;
     private DispositionQueue dispositionQueue;
@@ -3583,6 +3586,7 @@ public final class LoginActivity extends Activity {
             new AlertDialog.Builder(this).setTitle("Door in progress").setMessage("Finish your current door before starting a new one.").setPositiveButton("OK", null).show();
             return;
         }
+        pendingConfirmedAddress = null;
         checkDuplicateThenShowStartDialog(pointId, lat, lon);
     }
 
@@ -3598,12 +3602,22 @@ public final class LoginActivity extends Activity {
      * finished (see D2dDisposition::finishForEmployeeToken()), so a duplicate can't slip through just
      * because this particular check never ran. */
     private void checkDuplicateThenShowStartDialog(Long pointId, double lat, double lon) {
+        checkDuplicateThenShowStartDialog(pointId, lat, lon, null);
+    }
+
+    /** $houseNumber is set only after the rep was asked to type the house they're standing at (the server
+     * answers "ambiguous" when GPS can't tell nearby houses apart and one of them is already closed out);
+     * the server then checks that house instead of guessing from coordinates. */
+    private void checkDuplicateThenShowStartDialog(Long pointId, double lat, double lon, String houseNumber) {
         final String currentToken = token;
         new Thread(() -> {
             JSONObject result = null;
             boolean checkFailed = false;
             try {
-                result = EmployeeApi.post("telemapper/disposition/check-location", new JSONObject().put("token", currentToken).put("latitude", lat).put("longitude", lon));
+                JSONObject body = new JSONObject().put("token", currentToken).put("latitude", lat).put("longitude", lon);
+                if (pointId != null) body.put("location_point_id", (long) pointId);
+                if (houseNumber != null) body.put("house_number", houseNumber);
+                result = EmployeeApi.post("telemapper/disposition/check-location", body);
             } catch (Exception e) {
                 checkFailed = true;
             }
@@ -3611,11 +3625,61 @@ public final class LoginActivity extends Activity {
             boolean finalFailed = checkFailed;
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
-                if (finalFailed) showCouldNotVerifyDialog(pointId, lat, lon);
-                else if (finalResult.optBoolean("duplicate", false)) showDuplicateDoorWarning(finalResult, pointId, lat, lon);
-                else showStartDoorDialog(pointId, lat, lon);
+                if (finalFailed) {
+                    showCouldNotVerifyDialog(pointId, lat, lon);
+                } else if (finalResult.optBoolean("ambiguous", false)) {
+                    showEnterHouseNumberDialog(pointId, lat, lon, null);
+                } else if (finalResult.optBoolean("house_not_found", false)) {
+                    showEnterHouseNumberDialog(pointId, lat, lon, "No house numbered " + houseNumber + " was found near you. Check the number and try again.");
+                } else {
+                    String confirmed = finalResult.optString("house_address", "").trim();
+                    pendingConfirmedAddress = confirmed.isEmpty() ? null : confirmed;
+                    if (finalResult.optBoolean("duplicate", false)) showDuplicateDoorWarning(finalResult, pointId, lat, lon);
+                    else showStartDoorDialog(pointId, lat, lon);
+                }
             });
         }).start();
+    }
+
+    /** GPS error on a phone is often bigger than the gap between neighbouring houses, so when the server can't
+     * tell which house the rep is at (and one of the candidates was already sold / do-not-call) it must not guess
+     * -- the rep types the house number they're physically standing at, and that house is what gets checked. */
+    private void showEnterHouseNumberDialog(Long pointId, double lat, double lon, String problem) {
+        float density = getResources().getDisplayMetrics().density;
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (22 * density);
+        container.setPadding(pad, (int) (8 * density), pad, (int) (4 * density));
+
+        TextView message = new TextView(this);
+        message.setText((problem != null ? problem + "\n\n" : "") + "Your phone's GPS can't tell which of the nearby houses you're at. Enter the house number you are standing at to confirm.");
+        message.setTextColor(Theme.TEXT_SECONDARY);
+        message.setTextSize(14);
+        container.addView(message);
+
+        EditText numberField = new EditText(this);
+        numberField.setHint("House number (e.g. 9652)");
+        Theme.styleInput(numberField);
+        container.addView(numberField);
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setCustomTitle(Theme.dialogTitle(this, "Which house are you at?", Theme.WARNING))
+                .setView(container)
+                .setPositiveButton("Confirm", null)
+                .setNegativeButton("Cancel", null);
+        // A number that matched nothing nearby may be a house that simply isn't on the lead list.
+        if (problem != null) builder.setNeutralButton("Not on the list", (d, w) -> showStartDoorDialog(pointId, lat, lon));
+        AlertDialog dialog = builder.show();
+        Theme.styleDialog(dialog, Theme.WARNING);
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String typed = numberField.getText().toString().trim();
+            if (typed.isEmpty()) {
+                numberField.setError("Enter the house number");
+                return;
+            }
+            dialog.dismiss();
+            checkDuplicateThenShowStartDialog(pointId, lat, lon, typed);
+        });
     }
 
     private void showCouldNotVerifyDialog(Long pointId, double lat, double lon) {
@@ -3664,15 +3728,28 @@ public final class LoginActivity extends Activity {
         int pad = (int) (22 * density);
         container.setPadding(pad, 0, pad, (int) (4 * density));
 
+        // The address comes from a GPS lookup, which can name the neighbouring house -- the rep, standing at the
+        // door, is the only one who can say whether it's right, so starting is an explicit confirmation of it.
+        TextView confirmPrompt = new TextView(this);
+        confirmPrompt.setText("Is this the house you're standing at? Check the number on the door and correct it if it's wrong, then confirm.");
+        confirmPrompt.setTextColor(Theme.TEXT_SECONDARY);
+        confirmPrompt.setTextSize(14);
+        confirmPrompt.setPadding(0, (int) (8 * density), 0, (int) (8 * density));
+        container.addView(confirmPrompt);
+
         EditText addressField = new EditText(this);
         addressField.setHint("Looking up address…");
         Theme.styleInput(addressField);
         container.addView(addressField);
 
+        final String confirmedAddress = pendingConfirmedAddress;
+        pendingConfirmedAddress = null;
+        if (confirmedAddress != null) addressField.setText(confirmedAddress);
+
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setCustomTitle(Theme.dialogTitle(this, "I'm at the door", Theme.PRIMARY))
+                .setCustomTitle(Theme.dialogTitle(this, "Confirm the house", Theme.PRIMARY))
                 .setView(container)
-                .setPositiveButton("Start", null)
+                .setPositiveButton("Confirm & Start", null)
                 .setNeutralButton("Look Up", null)
                 .setNegativeButton("Cancel", null)
                 .show();
@@ -3692,7 +3769,7 @@ public final class LoginActivity extends Activity {
             // would leave the timesheet and the day's activity contradicting each other.
             confirmNotOnLunchThenStartDoor(pointId, lat, lon, address, dialog);
         });
-        lookupAddress(lat, lon, addressField);
+        if (confirmedAddress == null) lookupAddress(lat, lon, addressField);
     }
 
     private void confirmNotOnLunchThenStartDoor(Long pointId, double lat, double lon, String address, AlertDialog sourceDialog) {
@@ -3763,6 +3840,13 @@ public final class LoginActivity extends Activity {
     }
 
     private void submitStartDoor(Long pointId, double lat, double lon, String address) {
+        submitStartDoor(pointId, lat, lon, address, false);
+    }
+
+    /** $unlistedHouse is true only after the server said this address isn't on the lead list near the rep and the
+     * rep explicitly confirmed it's a new house -- the server never quietly attributes the visit to the nearest
+     * listed house instead (that's how a neighbour gets marked sold). */
+    private void submitStartDoor(Long pointId, double lat, double lon, String address, boolean unlistedHouse) {
         try {
             JSONObject body = new JSONObject().put("token", token);
             if (pointId != null) {
@@ -3771,6 +3855,7 @@ public final class LoginActivity extends Activity {
                 body.put("latitude", lat).put("longitude", lon);
             }
             if (!address.isEmpty()) body.put("address", address);
+            if (unlistedHouse) body.put("unlisted_house", true);
             request("telemapper/disposition/start", body, null, r -> {
                 activeDispositionId = r.getInt("disposition_id");
                 activeDoorStartedMs = java.time.Instant.parse(r.getString("created_utc").replace(' ', 'T') + "Z").toEpochMilli();
@@ -3779,6 +3864,18 @@ public final class LoginActivity extends Activity {
                 renderDoorsActive(address.isEmpty() ? "Door at recorded position" : address);
                 selectTab(5);
                 loadDoorsMap();
+            }, false, (status, problem) -> {
+                if (status != 409) return false;
+                new AlertDialog.Builder(this)
+                        .setCustomTitle(Theme.dialogTitle(this, "House not on the list", Theme.WARNING))
+                        .setMessage(problem)
+                        .setPositiveButton("It's a new house", (d, w) -> submitStartDoor(pointId, lat, lon, address, true))
+                        .setNegativeButton("Fix address", (d, w) -> {
+                            pendingConfirmedAddress = address;
+                            showStartDoorDialog(pointId, lat, lon);
+                        })
+                        .show();
+                return true;
             });
         } catch (Exception ignored) {
         }
@@ -4987,7 +5084,16 @@ public final class LoginActivity extends Activity {
         request(action, body, button, result, false);
     }
 
+    /** Lets a caller take over a specific server refusal (e.g. 409) instead of the generic error dialog; return true if handled. */
+    private interface ProblemHandler {
+        boolean handle(int status, String problem);
+    }
+
     private void request(String action, JSONObject body, Button button, Result result, boolean independentRead) {
+        request(action, body, button, result, independentRead, null);
+    }
+
+    private void request(String action, JSONObject body, Button button, Result result, boolean independentRead, ProblemHandler onProblem) {
         if (!independentRead && busy) return;
         if (!independentRead) busy = true;
         final String requestToken = token;
@@ -5045,6 +5151,7 @@ public final class LoginActivity extends Activity {
                         TrackingService.status = "Session expired. Sign in again.";
                         showLogin();
                     }
+                    if (onProblem != null && onProblem.handle(status, problem)) return;
                     new AlertDialog.Builder(this).setTitle("Employee sign-in").setMessage(problem).setPositiveButton("OK", null).show();
                     return;
                 }
