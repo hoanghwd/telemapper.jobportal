@@ -615,7 +615,7 @@ public final class LoginActivity extends Activity {
         loadMyAvatar(greetingAvatarView);
         TextView nameText = new TextView(this);
         nameText.setText("Welcome, " + employeeName);
-        nameText.setTextSize(24);
+        nameText.setTextSize(20);
         nameText.setTextColor(Theme.TEXT_PRIMARY);
         headerRow.addView(nameText, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         ImageButton signOut = Theme.iconButton(this, R.drawable.ic_logout, Theme.NEUTRAL, "Sign out");
