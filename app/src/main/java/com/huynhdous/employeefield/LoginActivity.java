@@ -37,6 +37,27 @@ public final class LoginActivity extends Activity {
     private Button enableTrackingButton;
     private String scheduleWeekStart;
     private LinearLayout scheduleTabContent;
+
+    // WEEKLY-SCHEDULE GATE: when the employee has shifts this week but has not confirmed the schedule, every action is turned off
+    // (dimmed and untouchable) and a banner says to confirm first. Set from the "schedule" reply (see setScheduleGate()).
+    private boolean scheduleGateLocked = false;
+    private String scheduleGateWeek;
+    private LinearLayout gateBanner;
+    private TextView gateBannerText;
+    private Button gateBannerButton;
+    private final java.util.List<View> gatedTimeClockViews = new java.util.ArrayList<>();
+
+    /** A column that swallows every touch meant for its children while the schedule gate is locked (scrolling still works). */
+    private final class GatedLinearLayout extends LinearLayout {
+        GatedLinearLayout(android.content.Context context) {
+            super(context);
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(android.view.MotionEvent ev) {
+            return scheduleGateLocked || super.onInterceptTouchEvent(ev);
+        }
+    }
     private LinearLayout dayTotalCard;
     private Gauge dayGauge;
     private Gauge weekGauge;
@@ -98,6 +119,9 @@ public final class LoginActivity extends Activity {
     /** The house the rep typed when GPS couldn't tell neighbours apart; pre-fills the start dialog so the
      * server resolves the same house at start as it did at check time. Cleared at the start of each attempt. */
     private String pendingConfirmedAddress;
+    // Optional business name typed in the "Confirm the house" dialog: carried through the "Fix address" round trip and sent with the start request.
+    private String pendingConfirmedBusiness;
+    private String doorBusinessName = "";
     private android.net.Uri pendingDoorsPhotoUri;
     private File pendingDoorsPhotoFile;
     private DispositionQueue dispositionQueue;
@@ -658,6 +682,37 @@ public final class LoginActivity extends Activity {
         screenTitleParams.bottomMargin = (int) (4 * density);
         panel.addView(screenTitleText, 1, screenTitleParams);
 
+        // "Confirm this week's schedule first" -- shown on every screen while the schedule gate is locked (hidden otherwise).
+        gateBanner = new LinearLayout(this);
+        gateBanner.setOrientation(LinearLayout.VERTICAL);
+        gateBanner.setPadding((int) (14 * density), (int) (12 * density), (int) (14 * density), (int) (12 * density));
+        android.graphics.drawable.GradientDrawable gateBg = new android.graphics.drawable.GradientDrawable();
+        gateBg.setColor(0xfffff7ed);
+        gateBg.setStroke((int) (1 * density), Theme.WARNING);
+        gateBg.setCornerRadius(10 * density);
+        gateBanner.setBackground(gateBg);
+        TextView gateTitle = new TextView(this);
+        gateTitle.setText("🔒 Confirm this week's schedule first");
+        gateTitle.setTextSize(15);
+        gateTitle.setTypeface(gateTitle.getTypeface(), android.graphics.Typeface.BOLD);
+        gateTitle.setTextColor(0xff9a3412);
+        gateBanner.addView(gateTitle);
+        gateBannerText = new TextView(this);
+        gateBannerText.setTextSize(13);
+        gateBannerText.setTextColor(0xff7c2d12);
+        gateBannerText.setPadding(0, (int) (4 * density), 0, 0);
+        gateBanner.addView(gateBannerText);
+        gateBannerButton = styledButton("Open Schedule to confirm", Theme.WARNING);
+        gateBannerButton.setOnClickListener(v -> selectTab(0));
+        LinearLayout.LayoutParams gateButtonParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        gateButtonParams.topMargin = (int) (10 * density);
+        gateBanner.addView(gateBannerButton, gateButtonParams);
+        gateBanner.setVisibility(View.GONE);
+        LinearLayout.LayoutParams gateBannerParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        gateBannerParams.topMargin = (int) (6 * density);
+        gateBannerParams.bottomMargin = (int) (4 * density);
+        panel.addView(gateBanner, 2, gateBannerParams);
+
         // The old horizontal tab bar is gone — these are now rows inside the slide-out nav drawer
         // (built by installDrawer() at the end of this method), not children of `panel`.
         tabScheduleLabel = Theme.drawerMenuItem(this, R.drawable.ic_tab_schedule, "Schedule");
@@ -738,7 +793,7 @@ public final class LoginActivity extends Activity {
         scheduleTabContent.addView(confirmButton);
         confirmButton.setOnClickListener(v -> confirmSchedule());
 
-        locationTabContent = new LinearLayout(this);
+        locationTabContent = new GatedLinearLayout(this);
         locationTabContent.setOrientation(LinearLayout.VERTICAL);
         locationTabContent.setPadding(0, pad / 2, 0, 0);
         locationTabContent.setVisibility(View.GONE);
@@ -789,7 +844,7 @@ public final class LoginActivity extends Activity {
         locationTabContent.addView(refreshLocation, refreshParams);
         refreshLocation.setOnClickListener(v -> loadMyLocation());
 
-        tripTabContent = new LinearLayout(this);
+        tripTabContent = new GatedLinearLayout(this);
         tripTabContent.setOrientation(LinearLayout.VERTICAL);
         tripTabContent.setPadding(0, pad / 2, 0, 0);
         tripTabContent.setVisibility(View.GONE);
@@ -835,7 +890,7 @@ public final class LoginActivity extends Activity {
         tripTabContent.addView(tripRefresh, tripRefreshParams);
         tripRefresh.setOnClickListener(v -> loadTrip());
 
-        timesheetTabContent = new LinearLayout(this);
+        timesheetTabContent = new GatedLinearLayout(this);
         timesheetTabContent.setOrientation(LinearLayout.VERTICAL);
         timesheetTabContent.setPadding(0, pad / 2, 0, 0);
         timesheetTabContent.setVisibility(View.GONE);
@@ -876,7 +931,7 @@ public final class LoginActivity extends Activity {
         timesheetDaysParams.topMargin = (int) (8 * density);
         timesheetTabContent.addView(timesheetDaysContainer, timesheetDaysParams);
 
-        profileTabContent = new LinearLayout(this);
+        profileTabContent = new GatedLinearLayout(this);
         profileTabContent.setOrientation(LinearLayout.VERTICAL);
         profileTabContent.setPadding(0, pad / 2, 0, 0);
         profileTabContent.setVisibility(View.GONE);
@@ -983,7 +1038,7 @@ public final class LoginActivity extends Activity {
             }
         });
 
-        doorsTabContent = new LinearLayout(this);
+        doorsTabContent = new GatedLinearLayout(this);
         doorsTabContent.setOrientation(LinearLayout.VERTICAL);
         doorsTabContent.setPadding(0, pad / 2, 0, 0);
         doorsTabContent.setVisibility(View.GONE);
@@ -1114,7 +1169,7 @@ public final class LoginActivity extends Activity {
         myLeadsContainerParams.topMargin = (int) (8 * density);
         doorsTabContent.addView(myLeadsContainer, myLeadsContainerParams);
 
-        eventsTabContent = new LinearLayout(this);
+        eventsTabContent = new GatedLinearLayout(this);
         eventsTabContent.setOrientation(LinearLayout.VERTICAL);
         eventsTabContent.setPadding(0, pad / 2, 0, 0);
         eventsTabContent.setVisibility(View.GONE);
@@ -1142,7 +1197,7 @@ public final class LoginActivity extends Activity {
 
         // D2D's equivalent of "My Events" — S2S reps see what event they're staffed to; D2D reps
         // see what program they're currently out selling, same "assigned by a manager" shape.
-        programsTabContent = new LinearLayout(this);
+        programsTabContent = new GatedLinearLayout(this);
         programsTabContent.setOrientation(LinearLayout.VERTICAL);
         programsTabContent.setPadding(0, pad / 2, 0, 0);
         programsTabContent.setVisibility(View.GONE);
@@ -1168,7 +1223,7 @@ public final class LoginActivity extends Activity {
         myProgramsContainerParams.topMargin = (int) (12 * density);
         programsTabContent.addView(myProgramsContainer, myProgramsContainerParams);
 
-        arrivalTabContent = new LinearLayout(this);
+        arrivalTabContent = new GatedLinearLayout(this);
         arrivalTabContent.setOrientation(LinearLayout.VERTICAL);
         arrivalTabContent.setPadding(0, pad / 2, 0, 0);
         arrivalTabContent.setVisibility(View.GONE);
@@ -1211,6 +1266,7 @@ public final class LoginActivity extends Activity {
         tabProgramsLabel.setOnClickListener(v -> { selectTab(8); closeDrawer(); });
         tabArrivalLabel.setOnClickListener(v -> { selectTab(7); closeDrawer(); });
         selectTab(restoredTabIndex);
+        if (restoredTabIndex != 0) refreshScheduleGate();   // opening on another screen: still check the gate
 
         enableTracking();
         installDrawer(menuButton);
@@ -1318,6 +1374,7 @@ public final class LoginActivity extends Activity {
         Theme.styleTabItem(tabEventsLabel, index == 6);
         Theme.styleTabItem(tabArrivalLabel, index == 7);
         Theme.styleTabItem(tabProgramsLabel, index == 8);
+        applyScheduleGate();
         if (index == 0) loadSchedule();
         else if (index == 1) loadMyLocation();
         else if (index == 2) loadTrip();
@@ -3587,6 +3644,7 @@ public final class LoginActivity extends Activity {
             return;
         }
         pendingConfirmedAddress = null;
+        pendingConfirmedBusiness = null;
         checkDuplicateThenShowStartDialog(pointId, lat, lon);
     }
 
@@ -3746,6 +3804,17 @@ public final class LoginActivity extends Activity {
         pendingConfirmedAddress = null;
         if (confirmedAddress != null) addressField.setText(confirmedAddress);
 
+        // Only for a business: a home is simply left blank.
+        EditText businessField = new EditText(this);
+        businessField.setHint("Business name (optional)");
+        businessField.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        businessField.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(150)});
+        Theme.styleInput(businessField);
+        container.addView(businessField);
+        final String confirmedBusiness = pendingConfirmedBusiness;
+        pendingConfirmedBusiness = null;
+        if (confirmedBusiness != null) businessField.setText(confirmedBusiness);
+
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setCustomTitle(Theme.dialogTitle(this, "Confirm the house", Theme.PRIMARY))
                 .setView(container)
@@ -3765,6 +3834,7 @@ public final class LoginActivity extends Activity {
                 addressField.setError("Enter the house address");
                 return;
             }
+            doorBusinessName = businessField.getText().toString().trim();
             // The reverse case of the lunch guard: starting a sale while still clocked in on lunch
             // would leave the timesheet and the day's activity contradicting each other.
             confirmNotOnLunchThenStartDoor(pointId, lat, lon, address, dialog);
@@ -3855,13 +3925,15 @@ public final class LoginActivity extends Activity {
                 body.put("latitude", lat).put("longitude", lon);
             }
             if (!address.isEmpty()) body.put("address", address);
+            if (!doorBusinessName.isEmpty()) body.put("business_name", doorBusinessName);
             if (unlistedHouse) body.put("unlisted_house", true);
             request("telemapper/disposition/start", body, null, r -> {
                 activeDispositionId = r.getInt("disposition_id");
                 activeDoorStartedMs = java.time.Instant.parse(r.getString("created_utc").replace(' ', 'T') + "Z").toEpochMilli();
                 activeDoorLat = r.getDouble("latitude");
                 activeDoorLon = r.getDouble("longitude");
-                renderDoorsActive(address.isEmpty() ? "Door at recorded position" : address);
+                String shownAddress = address.isEmpty() ? "Door at recorded position" : address;
+                renderDoorsActive(doorBusinessName.isEmpty() ? shownAddress : shownAddress + "\n" + doorBusinessName);
                 selectTab(5);
                 loadDoorsMap();
             }, false, (status, problem) -> {
@@ -3872,6 +3944,7 @@ public final class LoginActivity extends Activity {
                         .setPositiveButton("It's a new house", (d, w) -> submitStartDoor(pointId, lat, lon, address, true))
                         .setNegativeButton("Fix address", (d, w) -> {
                             pendingConfirmedAddress = address;
+                            pendingConfirmedBusiness = doorBusinessName;
                             showStartDoorDialog(pointId, lat, lon);
                         })
                         .show();
@@ -4254,6 +4327,52 @@ public final class LoginActivity extends Activity {
         row.addView(badge, params);
     }
 
+    /** Locks or unlocks the app for the week: locked = shifts are scheduled this week and the employee has not confirmed the schedule. */
+    private void setScheduleGate(boolean locked, String weekStart) {
+        scheduleGateLocked = locked;
+        scheduleGateWeek = weekStart;
+        applyScheduleGate();
+    }
+
+    /** Dims everything that is turned off, shows/hides the banner. The Schedule screen itself (so the schedule can be read and confirmed),
+     * the menu and Sign out stay usable; every other screen and every time-clock button is dimmed and ignores touches. */
+    private void applyScheduleGate() {
+        float alpha = scheduleGateLocked ? 0.4f : 1f;
+        View[] screens = {locationTabContent, tripTabContent, timesheetTabContent, profileTabContent, doorsTabContent, eventsTabContent, programsTabContent, arrivalTabContent};
+        for (View v : screens) if (v != null) v.setAlpha(alpha);
+        for (View v : gatedTimeClockViews) v.setAlpha(alpha);
+        if (gateBanner == null) return;
+        gateBanner.setVisibility(scheduleGateLocked ? View.VISIBLE : View.GONE);
+        if (scheduleGateLocked) {
+            String week = "";
+            try {
+                if (scheduleGateWeek != null) {
+                    java.time.LocalDate monday = java.time.LocalDate.parse(scheduleGateWeek);
+                    week = " for the week of " + java.time.format.DateTimeFormatter.ofPattern("EEE, MMM d").format(monday);
+                }
+            } catch (Exception ignored) {
+            }
+            gateBannerText.setText("Everything is turned off until you confirm your schedule" + week + ". Open the Schedule, read it, then tap “Confirm this week's schedule”.");
+            // on the Schedule screen the confirm button is right there; elsewhere this takes you to it
+            gateBannerButton.setVisibility(currentTabIndex == 0 ? View.GONE : View.VISIBLE);
+        }
+    }
+
+    private static boolean scheduleIsConfirmed(JSONObject data) {
+        String confirmedUtc = data.isNull("confirmed_utc") ? null : data.optString("confirmed_utc", null);
+        return confirmedUtc != null && !confirmedUtc.isEmpty();
+    }
+
+    /** Checks the gate without drawing the Schedule screen (used when the app opens on another screen). */
+    private void refreshScheduleGate() {
+        try {
+            request("schedule", new JSONObject().put("token", token), null, r ->
+                    setScheduleGate(r.getJSONArray("assignments").length() > 0 && !scheduleIsConfirmed(r), r.optString("week_start", null)), true);
+        } catch (Exception ignored) {
+            // offline or unreachable: keep whatever was last known rather than locking someone out of the field
+        }
+    }
+
     private void loadSchedule() {
         loadWeekTotal();
         try {
@@ -4281,6 +4400,10 @@ public final class LoginActivity extends Activity {
         java.time.LocalDate today = java.time.LocalDate.now(zone);
 
         org.json.JSONArray assignments = data.getJSONArray("assignments");
+        // decided BEFORE the day buttons are built, so they start out turned off if the week is not confirmed yet
+        gatedTimeClockViews.clear();
+        scheduleGateLocked = assignments.length() > 0 && !scheduleIsConfirmed(data);
+        scheduleGateWeek = scheduleWeekStart;
         java.util.Map<String, java.util.List<JSONObject>> byDate = new java.util.LinkedHashMap<>();
         for (int i = 0; i < assignments.length(); i++) {
             JSONObject a = assignments.getJSONObject(i);
@@ -4332,7 +4455,8 @@ public final class LoginActivity extends Activity {
                 if (isToday) todayMinutesScheduled += shiftMinutes;
             }
             if (date.isAfter(today)) continue;
-            LinearLayout timeClockContainer = new LinearLayout(this);
+            LinearLayout timeClockContainer = new GatedLinearLayout(this);
+            gatedTimeClockViews.add(timeClockContainer);
             timeClockContainer.setOrientation(LinearLayout.VERTICAL);
             scheduleContainer.addView(timeClockContainer);
             boolean withinWindow = false;
@@ -4367,6 +4491,7 @@ public final class LoginActivity extends Activity {
             confirmStatus.setVisibility(View.GONE);
             confirmButton.setVisibility(View.VISIBLE);
         }
+        applyScheduleGate();
     }
 
     private void confirmSchedule() {
@@ -4375,6 +4500,7 @@ public final class LoginActivity extends Activity {
                 confirmButton.setVisibility(View.GONE);
                 confirmStatus.setText("✓ Schedule confirmed just now.");
                 confirmStatus.setVisibility(View.VISIBLE);
+                setScheduleGate(false, scheduleWeekStart);   // everything turns back on
             });
         } catch (Exception ignored) {
         }
