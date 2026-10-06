@@ -1,7 +1,6 @@
 package com.huynhdous.employeefield;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.os.Bundle;
 import android.text.InputType;
 import android.text.method.PasswordTransformationMethod;
@@ -147,6 +146,17 @@ public final class LoginActivity extends Activity {
     private File pendingRetryPhotoFile;
     private static final int REQUEST_RETRY_CAMERA_PERMISSION = 68;
     private static final int REQUEST_TAKE_RETRY_PHOTO = 69;
+    // Correcting a check-in photo after the fact (replace / add): which check-in, which photo (store position, 0 = a new
+    // store photo), and the fresh picture waiting to be confirmed. Saved with the rest of the camera state below.
+    private static final int REQUEST_TAKE_CORRECTION_PHOTO = 70;
+    private static final String STATE_CORRECTION_PATH = "pending_correction_path";
+    private static final String STATE_CORRECTION_ARRIVAL = "correction_arrival_id";
+    private static final String STATE_CORRECTION_WHICH = "correction_which";
+    private static final String STATE_CORRECTION_POSITION = "correction_position";
+    private File pendingCorrectionFile;
+    private long correctionArrivalId;
+    private String correctionWhich;
+    private int correctionPosition;
     private org.json.JSONObject activeArrivalAssignment;
     private Double activeArrivalLat;
     private Double activeArrivalLon;
@@ -249,6 +259,16 @@ public final class LoginActivity extends Activity {
                     pendingStorePhotoUri = androidx.core.content.FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", f);
                 }
             }
+            String correctionPath = state.getString(STATE_CORRECTION_PATH);
+            if (correctionPath != null) {
+                File f = new File(correctionPath);
+                if (f.exists() && f.length() > 0) {
+                    pendingCorrectionFile = f;
+                    correctionArrivalId = state.getLong(STATE_CORRECTION_ARRIVAL);
+                    correctionWhich = state.getString(STATE_CORRECTION_WHICH);
+                    correctionPosition = state.getInt(STATE_CORRECTION_POSITION);
+                }
+            }
             String assignmentJson = state.getString(STATE_ARRIVAL_ASSIGNMENT);
             if (assignmentJson != null) {
                 try {
@@ -295,6 +315,12 @@ public final class LoginActivity extends Activity {
         if (pendingSelfieFile != null) outState.putString(STATE_SELFIE_PATH, pendingSelfieFile.getAbsolutePath());
         if (pendingStorePhotoFile != null) outState.putString(STATE_STORE_PATH, pendingStorePhotoFile.getAbsolutePath());
         if (activeArrivalAssignment != null) outState.putString(STATE_ARRIVAL_ASSIGNMENT, activeArrivalAssignment.toString());
+        if (pendingCorrectionFile != null) {
+            outState.putString(STATE_CORRECTION_PATH, pendingCorrectionFile.getAbsolutePath());
+            outState.putLong(STATE_CORRECTION_ARRIVAL, correctionArrivalId);
+            outState.putString(STATE_CORRECTION_WHICH, correctionWhich);
+            outState.putInt(STATE_CORRECTION_POSITION, correctionPosition);
+        }
         if (!acceptedStorePhotos.isEmpty()) {
             String[] paths = new String[acceptedStorePhotos.size()];
             for (int i = 0; i < paths.length; i++) paths[i] = acceptedStorePhotos.get(i).getAbsolutePath();
@@ -411,7 +437,7 @@ public final class LoginActivity extends Activity {
             }
             return false;
         });
-        findViewById(R.id.help).setOnClickListener(v -> new AlertDialog.Builder(this).setTitle(R.string.help).setMessage(R.string.help_message).setPositiveButton(R.string.ok, null).show());
+        findViewById(R.id.help).setOnClickListener(v -> new Popup.Builder(this).setTitle(R.string.help).setMessage(R.string.help_message).setPositiveButton(R.string.ok, null).show());
     }
 
     private void login() {
@@ -884,11 +910,22 @@ public final class LoginActivity extends Activity {
         LinearLayout.LayoutParams tripMapParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (int) (320 * density));
         tripCard.addView(tripMapView, tripMapParams);
 
+        LinearLayout tripButtonRow = new LinearLayout(this);
+        tripButtonRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams tripButtonRowParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tripButtonRowParams.topMargin = (int) (8 * density);
+        tripTabContent.addView(tripButtonRow, tripButtonRowParams);
         LinearLayout tripRefresh = Theme.iconTextButton(this, R.drawable.ic_refresh, "Refresh", Theme.PRIMARY);
-        LinearLayout.LayoutParams tripRefreshParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        tripRefreshParams.topMargin = (int) (8 * density);
-        tripTabContent.addView(tripRefresh, tripRefreshParams);
+        tripButtonRow.addView(tripRefresh);
         tripRefresh.setOnClickListener(v -> loadTrip());
+        LinearLayout tripWhereAmI = Theme.iconTextButton(this, R.drawable.ic_tab_location, "Where am I", Theme.PRIMARY);
+        LinearLayout.LayoutParams tripWhereParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tripWhereParams.leftMargin = (int) (8 * density);
+        tripButtonRow.addView(tripWhereAmI, tripWhereParams);
+        tripWhereAmI.setOnClickListener(v -> showWhereAmIOnTrip());
+        tripRefreshView = tripButtonRow;
+        // The map takes whatever height is left, so Refresh sits just above the bottom of the screen (re-fitted whenever the layout changes).
+        tripTabContent.getViewTreeObserver().addOnGlobalLayoutListener(this::fitTripMapToScreen);
 
         timesheetTabContent = new GatedLinearLayout(this);
         timesheetTabContent.setOrientation(LinearLayout.VERTICAL);
@@ -1351,7 +1388,56 @@ public final class LoginActivity extends Activity {
         return "Trip date: " + java.time.format.DateTimeFormatter.ofPattern("EEE, MMM d").format(tripDate);
     }
 
-    private static final String[] SCREEN_TITLES = {"Schedule", "Location", "Trip", "Time Sheet", "Profile", "D2D", "Events", "Check In", "Programs"};
+    private View tripRefreshView;
+
+    /** "Where am I" on the Trip tab: a fresh, accurate position (same reading the check-in uses, not a stale cached one), then
+     * the map jumps there and marks it. */
+    private void showWhereAmIOnTrip() {
+        if (tripMapView == null) return;
+        if (!hasLocationPermission()) {
+            Toast.makeText(this, "Grant location permission to use this.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, "Finding your location…", Toast.LENGTH_SHORT).show();
+        fetchBestLocation(
+                () -> Toast.makeText(this, "Unable to get your location. Move outdoors or near a window and try again.", Toast.LENGTH_LONG).show(),
+                (lat, lon) -> {
+                    if (tripMapView != null) tripMapView.evaluateJavascript("if(window.locateMe)window.locateMe(" + lat + "," + lon + ");", null);
+                });
+    }
+
+    /** Stretches the Trip map so the Refresh button below it ends just above the bottom of the screen: the room left in the
+     * scroll area, minus what sits above the map and the card padding / Refresh button / panel padding below it. */
+    private void fitTripMapToScreen() {
+        if (tripMapView == null || tripRefreshView == null || tripTabContent == null || tripTabContent.getVisibility() != View.VISIBLE) return;
+        ScrollView scroll = null;
+        for (android.view.ViewParent p = tripMapView.getParent(); p != null; p = p.getParent()) {
+            if (p instanceof ScrollView) { scroll = (ScrollView) p; break; }
+        }
+        if (scroll == null || scroll.getChildCount() == 0 || scroll.getHeight() == 0) return;
+        View content = scroll.getChildAt(0);
+        int top = 0;
+        View v = tripMapView;
+        while (v != content) {
+            top += v.getTop();
+            if (!(v.getParent() instanceof View)) return;
+            v = (View) v.getParent();
+        }
+        float density = getResources().getDisplayMetrics().density;
+        ViewGroup.MarginLayoutParams refreshParams = (ViewGroup.MarginLayoutParams) tripRefreshView.getLayoutParams();
+        int refreshHeight = tripRefreshView.getHeight() > 0 ? tripRefreshView.getHeight() : (int) (48 * density);
+        LinearLayout card = (LinearLayout) tripMapView.getParent();
+        int below = card.getPaddingBottom() + refreshParams.topMargin + refreshHeight + content.getPaddingBottom();
+        int available = scroll.getHeight() - scroll.getPaddingTop() - scroll.getPaddingBottom() - top - below;
+        int target = Math.max((int) (240 * density), Math.min(available, (int) (900 * density)));
+        ViewGroup.LayoutParams params = tripMapView.getLayoutParams();
+        if (Math.abs(params.height - target) > (int) density) {
+            params.height = target;
+            tripMapView.setLayoutParams(params);
+        }
+    }
+
+    private static final String[] SCREEN_TITLES ={"Schedule", "Location", "Trip", "Time Sheet", "Profile", "D2D", "Events", "Check In", "Programs"};
 
     private void selectTab(int index) {
         currentTabIndex = index;
@@ -1414,7 +1500,7 @@ public final class LoginActivity extends Activity {
     }
 
     private void showChangePhotoOptions() {
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle("Change photo")
                 .setItems(new String[]{"Take photo", "Choose from gallery"}, (dialog, which) -> {
                     if (which == 0) startCameraCapture();
@@ -1435,7 +1521,7 @@ public final class LoginActivity extends Activity {
             intent.addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             startActivityForResult(intent, REQUEST_TAKE_PHOTO);
         } catch (Exception e) {
-            new AlertDialog.Builder(this).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try choosing from gallery instead.").setPositiveButton("OK", null).show();
+            new Popup.Builder(this).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try choosing from gallery instead.").setPositiveButton("OK", null).show();
         }
     }
 
@@ -1469,6 +1555,19 @@ public final class LoginActivity extends Activity {
             }
             return;
         }
+        if (requestCode == REQUEST_TAKE_CORRECTION_PHOTO) {
+            if (pendingCorrectionFile != null && pendingCorrectionFile.length() > 0) {
+                showCorrectionReviewDialog();
+            } else {
+                pendingCorrectionFile = null;
+                new Popup.Builder(this)
+                        .setTitle("Photo not saved")
+                        .setMessage("The photo didn't save — this can happen with some camera apps. Try again.")
+                        .setPositiveButton("OK", null)
+                        .show();
+            }
+            return;
+        }
         if (requestCode == REQUEST_TAKE_DOORS_PHOTO) {
             // Same unreliable-resultCode issue as the arrival selfie/store photos (certain OEM camera
             // apps don't reliably return RESULT_OK even when the file wrote fine) — check the file
@@ -1485,7 +1584,7 @@ public final class LoginActivity extends Activity {
                 showEditFailedDialog(editingFailedFinish, editingFailedFinishAddress);
             } else {
                 pendingRetryPhotoFile = null;
-                new AlertDialog.Builder(this)
+                new Popup.Builder(this)
                         .setTitle("Photo not saved")
                         .setMessage("The photo didn't save — this can happen with some camera apps. Try again.")
                         .setPositiveButton("Retake", (d, w) -> beginRetryPhotoCapture())
@@ -1506,7 +1605,7 @@ public final class LoginActivity extends Activity {
 
     private void showArrivalPhotoFailedDialog(String which, Runnable retry) {
         if (arrivalMessageText != null) arrivalMessageText.setText("");
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle("Photo not saved")
                 .setMessage("The " + ("selfie".equals(which) ? "selfie" : "store photo") + " didn't save — this can happen with some camera apps. Try again.")
                 .setPositiveButton("Retake", (d, w) -> retry.run())
@@ -1523,7 +1622,7 @@ public final class LoginActivity extends Activity {
 
     private void showDoorsPhotoFailedDialog() {
         if (doorsMessageText != null) doorsMessageText.setText("Timer running — tap Finish when the door closes.");
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle("Photo not saved")
                 .setMessage("The photo didn't save — this can happen with some camera apps. Try again.")
                 .setPositiveButton("Retake", (d, w) -> startDoorsPhotoCapture())
@@ -1561,7 +1660,7 @@ public final class LoginActivity extends Activity {
         int pad = (int) (16 * density);
         panel.setPadding(pad, pad, pad, pad);
         panel.addView(reviewThumbnail(pendingSelfieFile, 160));
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle("Selfie captured")
                 .setView(panel)
                 .setCancelable(false)
@@ -1589,7 +1688,7 @@ public final class LoginActivity extends Activity {
         countText.setTextColor(Theme.TEXT_SECONDARY);
         countText.setPadding(0, (int) (8 * density), 0, 0);
         panel.addView(countText);
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+        Popup.Builder builder = new Popup.Builder(this)
                 .setTitle("Store photo captured")
                 .setView(panel)
                 .setCancelable(false)
@@ -1644,7 +1743,7 @@ public final class LoginActivity extends Activity {
             runOnUiThread(() -> {
                 busy = false;
                 if (problem != null) {
-                    new AlertDialog.Builder(this).setTitle("Upload photo").setMessage(problem).setPositiveButton("OK", null).show();
+                    new Popup.Builder(this).setTitle("Upload photo").setMessage(problem).setPositiveButton("OK", null).show();
                 } else {
                     if (profileAvatarView != null) loadMyAvatar(profileAvatarView);
                     if (greetingAvatarView != null) loadMyAvatar(greetingAvatarView);
@@ -1771,7 +1870,7 @@ public final class LoginActivity extends Activity {
                 org.json.JSONArray stops = r.getJSONArray("route");
                 if (stops.length() == 0) {
                     String msg = r.isNull("message") ? "No route available yet." : r.getString("message");
-                    new AlertDialog.Builder(this).setTitle("Preview Route").setMessage(msg).setPositiveButton("OK", null).show();
+                    new Popup.Builder(this).setTitle("Preview Route").setMessage(msg).setPositiveButton("OK", null).show();
                     return;
                 }
                 String territoryName = r.isNull("territory_name") ? "Your territory" : r.getString("territory_name");
@@ -1791,7 +1890,7 @@ public final class LoginActivity extends Activity {
             names[i] = t.getString("territory_name");
             ids[i] = t.getInt("territory_id");
         }
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle("Which territory?")
                 .setItems(names, (d, which) -> previewRoute(ids[which]))
                 .setNegativeButton("Cancel", null)
@@ -1824,7 +1923,7 @@ public final class LoginActivity extends Activity {
         long doorMinutes = (long) n * 2;
         double hours = Math.round((walkMinutes + doorMinutes) / 60.0 * 10) / 10.0;
 
-        // A plain Dialog instead of AlertDialog.Builder: AlertDialog wraps a custom view in its own
+        // A plain Dialog instead of Popup.Builder: AlertDialog wraps a custom view in its own
         // internal scroll container that measures it as wrap_content regardless of the view's own
         // requested layout params, which is exactly what was squashing the WebView to near-zero
         // height. A plain Dialog with setContentView() has no such wrapper.
@@ -2006,7 +2105,7 @@ public final class LoginActivity extends Activity {
                 }
                 if (r.isNull("active")) {
                     renderDoorsIdle();
-                    if (finishAfterLoad) new AlertDialog.Builder(this).setMessage("This door is already finished. Refreshing your doors.").setPositiveButton("OK", null).show();
+                    if (finishAfterLoad) new Popup.Builder(this).setMessage("This door is already finished. Refreshing your doors.").setPositiveButton("OK", null).show();
                 } else {
                     JSONObject active = r.getJSONObject("active");
                     activeDispositionId = active.getInt("disposition_id");
@@ -2015,7 +2114,7 @@ public final class LoginActivity extends Activity {
                     activeDoorLon = active.isNull("longitude") ? null : active.getDouble("longitude");
                     renderDoorsActive(active.getString("address"));
                     if (finishAfterLoad && java.util.Objects.equals(activeDispositionId, expectedDoorId)) beginFinishDoor();
-                    else if (finishAfterLoad) new AlertDialog.Builder(this).setMessage("The active door has changed. Please select the current door again.").setPositiveButton("OK", null).show();
+                    else if (finishAfterLoad) new Popup.Builder(this).setMessage("The active door has changed. Please select the current door again.").setPositiveButton("OK", null).show();
                 }
             }, true);
         } catch (Exception ignored) {
@@ -2126,7 +2225,7 @@ public final class LoginActivity extends Activity {
             row.addView(badge);
             if (inProgress) {
                 row.setContentDescription(d.optString("address", "Door") + ". In progress. Tap to finish.");
-                row.setOnClickListener(v -> new AlertDialog.Builder(this)
+                row.setOnClickListener(v -> new Popup.Builder(this)
                         .setTitle("Finish this door?")
                         .setMessage(d.optString("address", "Current door") + "\nRecord the outcome and required photo to finish this visit.")
                         .setPositiveButton("Finish door", (dialog, which) -> loadDoors(true, d.optInt("disposition_id")))
@@ -2212,7 +2311,7 @@ public final class LoginActivity extends Activity {
                     if (claimed != null) showNeedsAttentionDialog(claimed, address);
                     loadDoors();
                 } else {
-                    new AlertDialog.Builder(this)
+                    new Popup.Builder(this)
                             .setTitle("Not yours")
                             .setMessage(check == null
                                     ? "Couldn't verify this record right now. Try again when you have a signal."
@@ -2233,11 +2332,11 @@ public final class LoginActivity extends Activity {
      * reaches here, so this never exposes another employee's photo/note. */
     private void showNeedsAttentionDialog(DispositionQueue.Finish f, String address) {
         String reason = f.failureReason != null && !f.failureReason.isEmpty() ? f.failureReason : "Unable to save this door.";
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle("Needs attention")
                 .setMessage(address + "\n\n" + reason)
                 .setPositiveButton("Edit & Retry", (d, w) -> showEditFailedDialog(f, address))
-                .setNeutralButton("Discard", (d, w) -> new AlertDialog.Builder(this)
+                .setNeutralButton("Discard", (d, w) -> new Popup.Builder(this)
                         .setTitle("Discard this door?")
                         .setMessage("This permanently deletes the saved photo and outcome for " + address + ". This can't be undone.")
                         .setPositiveButton("Discard", (d2, w2) -> {
@@ -2408,14 +2507,14 @@ public final class LoginActivity extends Activity {
             noteField.setHint("other".equals(tag) ? "Reason (required)" : "Note (optional)");
         });
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        Popup dialog = new Popup.Builder(this)
                 .setCustomTitle(Theme.dialogTitle(this, "Edit " + address, Theme.PRIMARY))
                 .setView(container)
                 .setPositiveButton("Save & Retry", null)
                 .setNegativeButton("Cancel", (d, w) -> clearEditingFailedState())
                 .show();
         Theme.styleDialog(dialog, Theme.PRIMARY);
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        dialog.getButton(Popup.BUTTON_POSITIVE).setOnClickListener(v -> {
             int checkedId = radioGroup.getCheckedRadioButtonId();
             String status = "sold";
             if (checkedId != -1) {
@@ -2468,7 +2567,7 @@ public final class LoginActivity extends Activity {
             intent.addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             startActivityForResult(intent, REQUEST_TAKE_RETRY_PHOTO);
         } catch (Exception e) {
-            new AlertDialog.Builder(this).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try again.").setPositiveButton("OK", null).show();
+            new Popup.Builder(this).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try again.").setPositiveButton("OK", null).show();
         }
     }
 
@@ -2482,7 +2581,7 @@ public final class LoginActivity extends Activity {
             try {
                 byte[] bytes = readAllBytes(new FileInputStream(pendingRetryPhotoFile));
                 if (bytes.length > 8 * 1024 * 1024) {
-                    new AlertDialog.Builder(this).setTitle("Edit & Retry").setMessage("That photo is too large. The original photo was kept.").setPositiveButton("OK", null).show();
+                    new Popup.Builder(this).setTitle("Edit & Retry").setMessage("That photo is too large. The original photo was kept.").setPositiveButton("OK", null).show();
                 } else {
                     File durableDir = new File(getFilesDir(), "door_finishes");
                     if (!durableDir.exists()) durableDir.mkdirs();
@@ -2493,7 +2592,7 @@ public final class LoginActivity extends Activity {
                     photoPath = durablePhoto.getAbsolutePath();
                 }
             } catch (IOException e) {
-                new AlertDialog.Builder(this).setTitle("Edit & Retry").setMessage("Unable to save the new photo. The original photo was kept.").setPositiveButton("OK", null).show();
+                new Popup.Builder(this).setTitle("Edit & Retry").setMessage("Unable to save the new photo. The original photo was kept.").setPositiveButton("OK", null).show();
             } finally {
                 pendingRetryPhotoFile.delete();
             }
@@ -2588,14 +2687,14 @@ public final class LoginActivity extends Activity {
             noteField.setHint("other".equals(tag) ? "Reason (required)" : "Note (optional)");
         });
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        Popup dialog = new Popup.Builder(this)
                 .setCustomTitle(Theme.dialogTitle(this, "Correct " + address, Theme.PRIMARY))
                 .setView(container)
                 .setPositiveButton("Save correction", null)
                 .setNegativeButton("Cancel", null)
                 .show();
         Theme.styleDialog(dialog, Theme.PRIMARY);
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        dialog.getButton(Popup.BUTTON_POSITIVE).setOnClickListener(v -> {
             int checkedId = radioGroup.getCheckedRadioButtonId();
             String status = "sold";
             if (checkedId != -1) {
@@ -2647,7 +2746,7 @@ public final class LoginActivity extends Activity {
                 } else if (finalError != null && finalError.getMessage() != null && finalError.getMessage().contains("was already marked")) {
                     promptDuplicateReasonThenEditDoor(dispositionId, status, note, callbackDate, finalError.getMessage());
                 } else if (finalError != null) {
-                    new AlertDialog.Builder(this).setTitle("Unable to save").setMessage(finalError.getMessage()).setPositiveButton("OK", null).show();
+                    new Popup.Builder(this).setTitle("Unable to save").setMessage(finalError.getMessage()).setPositiveButton("OK", null).show();
                 }
             });
         }).start();
@@ -2664,7 +2763,7 @@ public final class LoginActivity extends Activity {
         container.setPadding(pad, pad / 2, pad, 0);
         container.addView(reasonField);
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        Popup dialog = new Popup.Builder(this)
                 .setCustomTitle(Theme.dialogTitle(this, "Explain this sale", Theme.WARNING))
                 .setMessage(serverMessage)
                 .setView(container)
@@ -2672,7 +2771,7 @@ public final class LoginActivity extends Activity {
                 .setNegativeButton("Cancel", null)
                 .show();
         Theme.styleDialog(dialog, Theme.WARNING);
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        dialog.getButton(Popup.BUTTON_POSITIVE).setOnClickListener(v -> {
             String reason = reasonField.getText().toString().trim();
             if (reason.isEmpty()) {
                 reasonField.setError("Required");
@@ -2961,6 +3060,200 @@ public final class LoginActivity extends Activity {
         card.addView(expiresText, expiresParams);
     }
 
+    // ------------------------------------------------------------------ check-in photo size
+    // A phone camera photo is 10-50 megapixels (5-15 MB). Sending that raw made check-in slow even on 5G, and the server then
+    // has to decode and shrink every one of them anyway (it keeps 1280 px). So shrink on the phone first: the long edge is
+    // capped and re-saved as a JPEG, which is a few hundred KB. The camera's rotation flag is applied to the pixels here
+    // because the re-saved file no longer carries it.
+    private static final int UPLOAD_MAX_EDGE = 1600;
+    private static final int UPLOAD_JPEG_QUALITY = 85;
+
+    private static byte[] photoBytesForUpload(File file) throws IOException {
+        try {
+            return compressedJpeg(file);
+        } catch (IOException | OutOfMemoryError e) {
+            // Could not shrink it (unreadable or too big for memory): send the original and let the server's own limits decide.
+            return readAllBytes(new java.io.FileInputStream(file));
+        }
+    }
+
+    private static byte[] compressedJpeg(File file) throws IOException {
+        String path = file.getAbsolutePath();
+        android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        android.graphics.BitmapFactory.decodeFile(path, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw new IOException("BAD_IMAGE");
+        int sample = 1;
+        while (Math.max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= UPLOAD_MAX_EDGE) sample *= 2;
+        android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+        opts.inSampleSize = sample;
+        android.graphics.Bitmap decoded = android.graphics.BitmapFactory.decodeFile(path, opts);
+        if (decoded == null) throw new IOException("BAD_IMAGE");
+        int orientation = android.media.ExifInterface.ORIENTATION_NORMAL;
+        try {
+            orientation = new android.media.ExifInterface(path).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL);
+        } catch (IOException ignored) {
+        }
+        android.graphics.Matrix matrix = new android.graphics.Matrix();
+        switch (orientation) {
+            case android.media.ExifInterface.ORIENTATION_FLIP_HORIZONTAL: matrix.postScale(-1f, 1f); break;
+            case android.media.ExifInterface.ORIENTATION_ROTATE_180: matrix.postRotate(180f); break;
+            case android.media.ExifInterface.ORIENTATION_FLIP_VERTICAL: matrix.postRotate(180f); matrix.postScale(-1f, 1f); break;
+            case android.media.ExifInterface.ORIENTATION_TRANSPOSE: matrix.postRotate(270f); matrix.postScale(-1f, 1f); break;
+            case android.media.ExifInterface.ORIENTATION_ROTATE_90: matrix.postRotate(90f); break;
+            case android.media.ExifInterface.ORIENTATION_TRANSVERSE: matrix.postRotate(90f); matrix.postScale(-1f, 1f); break;
+            case android.media.ExifInterface.ORIENTATION_ROTATE_270: matrix.postRotate(270f); break;
+            default: break;
+        }
+        float scale = (float) UPLOAD_MAX_EDGE / Math.max(decoded.getWidth(), decoded.getHeight());
+        if (scale < 1f) matrix.postScale(scale, scale);
+        android.graphics.Bitmap out = android.graphics.Bitmap.createBitmap(decoded, 0, 0, decoded.getWidth(), decoded.getHeight(), matrix, true);
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        out.compress(android.graphics.Bitmap.CompressFormat.JPEG, UPLOAD_JPEG_QUALITY, bytes);
+        if (out != decoded) out.recycle();
+        decoded.recycle();
+        return bytes.toByteArray();
+    }
+
+    // ------------------------------------------------------------------ fixing check-in photos afterwards
+    /** What each check-in photo is called, so the rep (and the manager on the web) can tell them apart. */
+    private static String arrivalPhotoLabel(String which, int position) {
+        if ("selfie".equals(which)) return "Selfie";
+        return position <= 1 ? "Store front" : "Store photo " + position;
+    }
+
+    /** Tapped a check-in photo: replace it with a new picture, or (a store photo, when another remains) delete it. */
+    private void showArrivalPhotoActions(long arrivalId, String which, int position, int storeCount) {
+        boolean canDelete = "store".equals(which) && storeCount > 1;
+        java.util.List<ActionSheet.Action> actions = new java.util.ArrayList<>();
+        actions.add(new ActionSheet.Action("Retake photo", R.drawable.ic_camera, false, () -> beginPhotoCorrection(arrivalId, which, position)));
+        if (canDelete) actions.add(new ActionSheet.Action("Delete photo", R.drawable.ic_delete, true, () -> confirmDeleteArrivalPhoto(arrivalId, position)));
+        ActionSheet.show(this, arrivalPhotoLabel(which, position), "selfie".equals(which) ? "Replace the selfie with a new one." : "Retake it" + (canDelete ? " or remove it from your check-in." : "."), actions);
+    }
+
+    private void confirmDeleteArrivalPhoto(long arrivalId, int position) {
+        new Popup.Builder(this)
+                .setTitle("Delete " + arrivalPhotoLabel("store", position) + "?")
+                .setMessage("This photo will be removed from your check-in.")
+                .setPositiveButton("Delete", (d, w) -> {
+                    try {
+                        request("telemapper/arrival/photo-delete", new JSONObject().put("token", token).put("arrival_id", arrivalId).put("position", position), null, r -> loadArrivalAssignments());
+                    } catch (Exception ignored) {
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    /** position 0 = add one more store photo; otherwise replace that photo (the selfie ignores the position). */
+    private void beginPhotoCorrection(long arrivalId, String which, int position) {
+        if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            if (arrivalMessageText != null) arrivalMessageText.setText("Camera permission is required to take a photo.");
+            return;
+        }
+        try {
+            File photoFile = File.createTempFile("fix_", ".jpg", getCacheDir());
+            pendingCorrectionFile = photoFile;
+            correctionArrivalId = arrivalId;
+            correctionWhich = which;
+            correctionPosition = position;
+            android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", photoFile);
+            android.content.Intent intent = new android.content.Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
+            intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, uri);
+            intent.addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            String what = "selfie".equals(which) ? "selfie" : (position == 0 ? "extra store photo" : arrivalPhotoLabel(which, position).toLowerCase(java.util.Locale.US));
+            new Popup.Builder(this)
+                    .setTitle("selfie".equals(which) ? "Selfie" : "Store photo")
+                    .setMessage("Take the new " + what + ".")
+                    .setPositiveButton("Open camera", (d, w) -> startActivityForResult(intent, REQUEST_TAKE_CORRECTION_PHOTO))
+                    .setNegativeButton("Cancel", (d, w) -> pendingCorrectionFile = null)
+                    .show();
+        } catch (Exception e) {
+            new Popup.Builder(this).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try again.").setPositiveButton("OK", null).show();
+        }
+    }
+
+    private void showCorrectionReviewDialog() {
+        if (pendingCorrectionFile == null) return;
+        float density = getResources().getDisplayMetrics().density;
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        int pad = (int) (16 * density);
+        panel.setPadding(pad, pad, pad, pad);
+        panel.addView(reviewThumbnail(pendingCorrectionFile, 160));
+        final String which = correctionWhich;
+        final int position = correctionPosition;
+        new Popup.Builder(this)
+                .setTitle(correctionPosition == 0 ? "New store photo" : arrivalPhotoLabel(which, position) + " — new photo")
+                .setView(panel)
+                .setCancelable(false)
+                .setPositiveButton("Use this photo", (d, w) -> uploadCorrectionPhoto())
+                .setNeutralButton("Retake", (d, w) -> beginPhotoCorrection(correctionArrivalId, which, position))
+                .setNegativeButton("Cancel", (d, w) -> pendingCorrectionFile = null)
+                .show();
+    }
+
+    private void uploadCorrectionPhoto() {
+        if (pendingCorrectionFile == null || busy) return;
+        busy = true;
+        final File file = pendingCorrectionFile;
+        final long arrivalId = correctionArrivalId;
+        final String which = correctionWhich;
+        final int position = correctionPosition;
+        if (arrivalMessageText != null) arrivalMessageText.setText("Saving photo…");
+        new Thread(() -> {
+            String error = null;
+            HttpsURLConnection conn = null;
+            try {
+                byte[] bytes = photoBytesForUpload(file);
+                String boundary = "----EmployeeFieldBoundary" + System.currentTimeMillis();
+                conn = (HttpsURLConnection) new URL(API + (position == 0 ? "telemapper/arrival/photo-add" : "telemapper/arrival/photo-replace")).openConnection();
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(20000);
+                conn.setReadTimeout(30000);
+                conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+                try (OutputStream out = conn.getOutputStream()) {
+                    writeMultipartField(out, boundary, "token", token);
+                    writeMultipartField(out, boundary, "arrival_id", String.valueOf(arrivalId));
+                    if (position != 0) {
+                        writeMultipartField(out, boundary, "which", which);
+                        writeMultipartField(out, boundary, "position", String.valueOf(position));
+                    }
+                    writeMultipartFile(out, boundary, "photo", "photo.jpg", "image/jpeg", bytes);
+                    out.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+                }
+                int code = conn.getResponseCode();
+                InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+                if (stream == null) throw new IOException();
+                JSONObject resp = new JSONObject(new String(readAllBytes(stream), StandardCharsets.UTF_8));
+                if (code < 200 || code >= 300 || !resp.optBoolean("success")) error = resp.optString("message", "Unable to save the photo.");
+            } catch (Exception e) {
+                error = "Unable to save the photo. Check your connection and try again.";
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+            String problem = error;
+            runOnUiThread(() -> {
+                busy = false;
+                if (arrivalMessageText != null) arrivalMessageText.setText("");
+                if (problem != null) {
+                    // Keep the picture so a dropped connection doesn't mean taking it again.
+                    new Popup.Builder(this)
+                            .setTitle("Photo not saved")
+                            .setMessage(problem)
+                            .setPositiveButton("Try again", (d, w) -> uploadCorrectionPhoto())
+                            .setNegativeButton("Cancel", (d, w) -> pendingCorrectionFile = null)
+                            .show();
+                } else {
+                    pendingCorrectionFile = null;
+                    loadArrivalAssignments();
+                }
+            });
+        }).start();
+    }
+
     private void loadArrivalAssignments() {
         if (arrivalAssignmentsContainer == null) return;
         arrivalMessageText.setText("Loading…");
@@ -2985,9 +3278,14 @@ public final class LoginActivity extends Activity {
                 conn.setConnectTimeout(15000);
                 conn.setReadTimeout(15000);
                 if (conn.getResponseCode() == 200) {
+                    // Shown at about 112 dp, so decode a quarter-size copy instead of the whole 1280 px picture.
+                    byte[] data;
                     try (InputStream in = conn.getInputStream()) {
-                        bitmap = android.graphics.BitmapFactory.decodeStream(in);
+                        data = readAllBytes(in);
                     }
+                    android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+                    opts.inSampleSize = 4;
+                    bitmap = android.graphics.BitmapFactory.decodeByteArray(data, 0, data.length, opts);
                 }
             } catch (Exception ignored) {
             } finally {
@@ -2998,6 +3296,28 @@ public final class LoginActivity extends Activity {
                 if (result != null) target.setImageBitmap(result);
             });
         }).start();
+    }
+
+    /** One check-in photo with its name underneath (Selfie / Store front / Store photo 2); tapping it offers retake or delete. */
+    private LinearLayout arrivalPhotoTile(long arrivalId, String which, int position, int storeCount, int size, float density) {
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams tileParams = new LinearLayout.LayoutParams(size, LinearLayout.LayoutParams.WRAP_CONTENT);
+        tileParams.rightMargin = (int) (6 * density);
+        tile.setLayoutParams(tileParams);
+        ImageView thumb = new ImageView(this);
+        thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        tile.addView(thumb, new LinearLayout.LayoutParams(size, size));
+        TextView caption = new TextView(this);
+        caption.setText(arrivalPhotoLabel(which, position));
+        caption.setTextSize(12);
+        caption.setTypeface(caption.getTypeface(), android.graphics.Typeface.BOLD);
+        caption.setTextColor(Theme.TEXT_SECONDARY);
+        caption.setPadding(0, (int) (2 * density), 0, 0);
+        tile.addView(caption);
+        loadArrivalThumbnail(arrivalId, which, position, thumb);
+        tile.setOnClickListener(v -> showArrivalPhotoActions(arrivalId, which, position, storeCount));
+        return tile;
     }
 
     private void renderArrivalAssignments(org.json.JSONArray assignments) throws Exception {
@@ -3071,21 +3391,28 @@ public final class LoginActivity extends Activity {
                     thumbScroll.addView(thumbRow);
 
                     int thumbSize = (int) (112 * density);
-                    ImageView selfieThumb = new ImageView(this);
-                    selfieThumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                    LinearLayout.LayoutParams selfieThumbParams = new LinearLayout.LayoutParams(thumbSize, thumbSize);
-                    selfieThumbParams.rightMargin = (int) (6 * density);
-                    thumbRow.addView(selfieThumb, selfieThumbParams);
-                    loadArrivalThumbnail(arrivalId, "selfie", 1, selfieThumb);
-
                     int storeCount = assignment.optInt("store_photo_count", 0);
+                    thumbRow.addView(arrivalPhotoTile(arrivalId, "selfie", 1, storeCount, thumbSize, density));
                     for (int p = 1; p <= storeCount; p++) {
-                        ImageView storeThumb = new ImageView(this);
-                        storeThumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                        LinearLayout.LayoutParams storeThumbParams = new LinearLayout.LayoutParams(thumbSize, thumbSize);
-                        storeThumbParams.rightMargin = (int) (6 * density);
-                        thumbRow.addView(storeThumb, storeThumbParams);
-                        loadArrivalThumbnail(arrivalId, "store", p, storeThumb);
+                        thumbRow.addView(arrivalPhotoTile(arrivalId, "store", p, storeCount, thumbSize, density));
+                    }
+
+                    // A forgotten or blurry photo can be fixed any time the same day, even after "I'm done".
+                    TextView fixHint = new TextView(this);
+                    fixHint.setText("Tap a photo to retake or delete it.");
+                    fixHint.setTextSize(12);
+                    fixHint.setTextColor(Theme.TEXT_SECONDARY);
+                    fixHint.setPadding(0, (int) (4 * density), 0, 0);
+                    card.addView(fixHint);
+                    if (storeCount < MAX_STORE_PHOTOS) {
+                        TextView addPhoto = new TextView(this);
+                        addPhoto.setText("+ Add a store photo");
+                        addPhoto.setTextSize(14);
+                        addPhoto.setTypeface(addPhoto.getTypeface(), android.graphics.Typeface.BOLD);
+                        addPhoto.setTextColor(Theme.PRIMARY);
+                        addPhoto.setPadding(0, (int) (8 * density), 0, (int) (4 * density));
+                        card.addView(addPhoto);
+                        addPhoto.setOnClickListener(v -> beginPhotoCorrection(arrivalId, "store", 0));
                     }
                 }
 
@@ -3133,7 +3460,7 @@ public final class LoginActivity extends Activity {
      * happened to be last. No photo needed: check-in already proved he was there. */
     private void confirmCheckOut(org.json.JSONObject assignment) {
         String siteName = assignment.optString("site_name", "this site");
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle("Check out?")
                 .setMessage("Mark yourself done at " + siteName + " and on your way?")
                 .setPositiveButton("Yes, check out", (d, w) -> beginCheckOut(assignment))
@@ -3153,7 +3480,7 @@ public final class LoginActivity extends Activity {
 
     private void showCheckOutLocationTimeoutDialog() {
         if (arrivalMessageText != null) arrivalMessageText.setText("");
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle("Unable to get your location")
                 .setMessage("Move outdoors or near a window and try again.")
                 .setPositiveButton("Try again", (d, w) -> beginCheckOut(activeCheckOutAssignment))
@@ -3173,7 +3500,7 @@ public final class LoginActivity extends Activity {
                 double distance = metersBetween(siteLat, siteLon, lat, lon);
                 if (distance > proximity) {
                     if (arrivalMessageText != null) arrivalMessageText.setText("");
-                    AlertDialog dialog = new AlertDialog.Builder(this)
+                    Popup dialog = new Popup.Builder(this)
                             .setCustomTitle(Theme.dialogTitle(this, "Too far from the worksite", Theme.WARNING))
                             .setMessage("You're about " + Math.round(distance) + "m from " + assignment.getString("site_name") + ". Move closer and try again.")
                             .setPositiveButton("Try again", (d, w) -> beginCheckOut(assignment))
@@ -3229,9 +3556,9 @@ public final class LoginActivity extends Activity {
             android.content.Intent intent = new android.content.Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
             intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, pendingSelfieUri);
             intent.addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            new AlertDialog.Builder(this).setTitle("Selfie").setMessage("Take a quick selfie to confirm it's you — flip to the front camera if needed.").setPositiveButton("Open camera", (d, w) -> startActivityForResult(intent, REQUEST_TAKE_SELFIE_PHOTO)).setNegativeButton("Cancel", null).show();
+            new Popup.Builder(this).setTitle("Selfie").setMessage("Take a quick selfie to confirm it's you — flip to the front camera if needed.").setPositiveButton("Open camera", (d, w) -> startActivityForResult(intent, REQUEST_TAKE_SELFIE_PHOTO)).setNegativeButton("Cancel", null).show();
         } catch (Exception e) {
-            new AlertDialog.Builder(this).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try again.").setPositiveButton("OK", null).show();
+            new Popup.Builder(this).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try again.").setPositiveButton("OK", null).show();
         }
     }
 
@@ -3243,9 +3570,9 @@ public final class LoginActivity extends Activity {
             android.content.Intent intent = new android.content.Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
             intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, pendingStorePhotoUri);
             intent.addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            new AlertDialog.Builder(this).setTitle("Store photo").setMessage("Now take a photo showing you're at the store front.").setPositiveButton("Open camera", (d, w) -> startActivityForResult(intent, REQUEST_TAKE_STORE_PHOTO)).setNegativeButton("Cancel", null).show();
+            new Popup.Builder(this).setTitle("Store photo").setMessage("Now take a photo showing you're at the store front.").setPositiveButton("Open camera", (d, w) -> startActivityForResult(intent, REQUEST_TAKE_STORE_PHOTO)).setNegativeButton("Cancel", null).show();
         } catch (Exception e) {
-            new AlertDialog.Builder(this).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try again.").setPositiveButton("OK", null).show();
+            new Popup.Builder(this).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try again.").setPositiveButton("OK", null).show();
         }
     }
 
@@ -3325,7 +3652,7 @@ public final class LoginActivity extends Activity {
 
     private void showArrivalLocationTimeoutDialog() {
         if (arrivalMessageText != null) arrivalMessageText.setText("");
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle("Unable to get your location")
                 .setMessage("Move outdoors or near a window and try again.")
                 .setPositiveButton("Try again", (d, w) -> locateArrivalThenCheckProximity())
@@ -3353,7 +3680,7 @@ public final class LoginActivity extends Activity {
                 double distance = metersBetween(siteLat, siteLon, lat, lon);
                 if (distance > proximity) {
                     if (arrivalMessageText != null) arrivalMessageText.setText("");
-                    AlertDialog dialog = new AlertDialog.Builder(this)
+                    Popup dialog = new Popup.Builder(this)
                             .setCustomTitle(Theme.dialogTitle(this, "Too far from the worksite", Theme.WARNING))
                             .setMessage("You're about " + Math.round(distance) + "m from " + activeArrivalAssignment.getString("site_name") + ". Move closer and try again.")
                             .setPositiveButton("Try again", (d, which) -> beginArrival(activeArrivalAssignment))
@@ -3381,7 +3708,7 @@ public final class LoginActivity extends Activity {
             // the app doing nothing at all. Surface it instead so a real cause is visible.
             if (arrivalMessageText != null) arrivalMessageText.setText("");
             final Double retryLat = lat, retryLon = lon;
-            new AlertDialog.Builder(this)
+            new Popup.Builder(this)
                     .setTitle("Check-in error")
                     .setMessage("Something went wrong finishing your check-in (" + e.getClass().getSimpleName()
                             + (e.getMessage() != null ? ": " + e.getMessage() : "") + "). Tap Retry to try again.")
@@ -3404,6 +3731,7 @@ public final class LoginActivity extends Activity {
         busy = true;
         final org.json.JSONObject assignment = activeArrivalAssignment;
         final android.net.Uri selfieUri = pendingSelfieUri;
+        final File selfieFile = pendingSelfieFile;
         final java.util.List<File> storeFiles = new java.util.ArrayList<>(acceptedStorePhotos);
         final Double lat = activeArrivalLat;
         final Double lon = activeArrivalLon;
@@ -3412,11 +3740,14 @@ public final class LoginActivity extends Activity {
             String error = null;
             HttpsURLConnection conn = null;
             try {
-                byte[] selfieBytes = readAllBytes(getContentResolver().openInputStream(selfieUri));
+                // Shrunk on the phone first (see photoBytesForUpload): a few hundred KB each instead of the camera's 5-15 MB.
+                byte[] selfieBytes = selfieFile != null && selfieFile.exists()
+                        ? photoBytesForUpload(selfieFile)
+                        : readAllBytes(getContentResolver().openInputStream(selfieUri));
                 if (selfieBytes.length > 8 * 1024 * 1024) throw new IOException("TOO_LARGE");
                 java.util.List<byte[]> storeBytesList = new java.util.ArrayList<>();
                 for (File f : storeFiles) {
-                    byte[] bytes = readAllBytes(new java.io.FileInputStream(f));
+                    byte[] bytes = photoBytesForUpload(f);
                     if (bytes.length > 8 * 1024 * 1024) throw new IOException("TOO_LARGE");
                     storeBytesList.add(bytes);
                 }
@@ -3425,7 +3756,7 @@ public final class LoginActivity extends Activity {
                 conn.setRequestMethod("POST");
                 conn.setDoOutput(true);
                 conn.setConnectTimeout(20000);
-                conn.setReadTimeout(20000);
+                conn.setReadTimeout(30000);
                 conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
                 try (OutputStream out = conn.getOutputStream()) {
                     writeMultipartField(out, boundary, "token", token);
@@ -3464,9 +3795,9 @@ public final class LoginActivity extends Activity {
                 activeArrivalLon = null;
                 if (arrivalMessageText != null) arrivalMessageText.setText("");
                 if (problem != null) {
-                    new AlertDialog.Builder(this).setTitle("Check in").setMessage(problem).setPositiveButton("OK", null).show();
+                    new Popup.Builder(this).setTitle("Check in").setMessage(problem).setPositiveButton("OK", null).show();
                 } else {
-                    new AlertDialog.Builder(this).setTitle("Checked in").setMessage("You're checked in. Have a great shift!").setPositiveButton("OK", null).show();
+                    new Popup.Builder(this).setTitle("Checked in").setMessage("You're checked in. Have a great shift!").setPositiveButton("OK", null).show();
                     loadArrivalAssignments();
                 }
             });
@@ -3527,7 +3858,7 @@ public final class LoginActivity extends Activity {
      * same accuracy-preferring approach as the S2S check-in's own location fetch. */
     private void beginStartNewDoorHere() {
         if (activeDispositionId != null) {
-            new AlertDialog.Builder(this).setTitle("Door in progress").setMessage("Finish your current door before starting a new one.").setPositiveButton("OK", null).show();
+            new Popup.Builder(this).setTitle("Door in progress").setMessage("Finish your current door before starting a new one.").setPositiveButton("OK", null).show();
             return;
         }
         if (!hasLocationPermission()) {
@@ -3629,7 +3960,7 @@ public final class LoginActivity extends Activity {
             runOnUiThread(() -> {
                 renderDoorsIdle();
                 if (problem != null) {
-                    new AlertDialog.Builder(this).setTitle("Unable to start").setMessage(problem).setPositiveButton("OK", null).show();
+                    new Popup.Builder(this).setTitle("Unable to start").setMessage(problem).setPositiveButton("OK", null).show();
                     return;
                 }
                 loadDoorsMap();
@@ -3640,7 +3971,7 @@ public final class LoginActivity extends Activity {
 
     private void confirmStartDoorAtPoint(Long pointId, double lat, double lon) {
         if (activeDispositionId != null) {
-            new AlertDialog.Builder(this).setTitle("Door in progress").setMessage("Finish your current door before starting a new one.").setPositiveButton("OK", null).show();
+            new Popup.Builder(this).setTitle("Door in progress").setMessage("Finish your current door before starting a new one.").setPositiveButton("OK", null).show();
             return;
         }
         pendingConfirmedAddress = null;
@@ -3720,16 +4051,16 @@ public final class LoginActivity extends Activity {
         Theme.styleInput(numberField);
         container.addView(numberField);
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+        Popup.Builder builder = new Popup.Builder(this)
                 .setCustomTitle(Theme.dialogTitle(this, "Which house are you at?", Theme.WARNING))
                 .setView(container)
                 .setPositiveButton("Confirm", null)
                 .setNegativeButton("Cancel", null);
         // A number that matched nothing nearby may be a house that simply isn't on the lead list.
         if (problem != null) builder.setNeutralButton("Not on the list", (d, w) -> showStartDoorDialog(pointId, lat, lon));
-        AlertDialog dialog = builder.show();
+        Popup dialog = builder.show();
         Theme.styleDialog(dialog, Theme.WARNING);
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        dialog.getButton(Popup.BUTTON_POSITIVE).setOnClickListener(v -> {
             String typed = numberField.getText().toString().trim();
             if (typed.isEmpty()) {
                 numberField.setError("Enter the house number");
@@ -3741,7 +4072,7 @@ public final class LoginActivity extends Activity {
     }
 
     private void showCouldNotVerifyDialog(Long pointId, double lat, double lon) {
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle("Could not verify household status")
                 .setMessage("Unable to check whether this house was already sold or marked do-not-call. Check your connection and retry, or continue without checking -- it'll still be verified when this door is finished and uploaded.")
                 .setPositiveButton("Retry", (d, w) -> checkDuplicateThenShowStartDialog(pointId, lat, lon))
@@ -3762,7 +4093,7 @@ public final class LoginActivity extends Activity {
         // Do Not Call is a hard stop, not a warning: the server rejects starting this door anyway
         // (D2dDisposition::startForEmployeeToken()), so offering "Continue Anyway" would only lead to an error.
         if ("do_not_call".equals(lead.optString("status", ""))) {
-            AlertDialog blocked = new AlertDialog.Builder(this)
+            Popup blocked = new Popup.Builder(this)
                     .setCustomTitle(Theme.dialogTitle(this, "Do Not Call", Theme.ERROR))
                     .setMessage((address.isEmpty() ? "This house" : address) + " was marked Do Not Call" + when + ".\n\nDo not knock this door. If the earlier outcome was a mistake, ask your manager to correct it.")
                     .setPositiveButton("OK", null)
@@ -3770,7 +4101,7 @@ public final class LoginActivity extends Activity {
             Theme.styleDialog(blocked, Theme.ERROR);
             return;
         }
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        Popup dialog = new Popup.Builder(this)
                 .setCustomTitle(Theme.dialogTitle(this, "Already " + statusLabel, Theme.WARNING))
                 .setMessage((address.isEmpty() ? "This house" : address) + " was already marked " + statusLabel + when + ". Knocking again may annoy the homeowner.\n\nOnly continue if this is genuinely a different unit, or the earlier outcome was wrong.")
                 .setPositiveButton("Continue Anyway", (d, w) -> showStartDoorDialog(pointId, lat, lon))
@@ -3815,7 +4146,7 @@ public final class LoginActivity extends Activity {
         pendingConfirmedBusiness = null;
         if (confirmedBusiness != null) businessField.setText(confirmedBusiness);
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        Popup dialog = new Popup.Builder(this)
                 .setCustomTitle(Theme.dialogTitle(this, "Confirm the house", Theme.PRIMARY))
                 .setView(container)
                 .setPositiveButton("Confirm & Start", null)
@@ -3823,12 +4154,12 @@ public final class LoginActivity extends Activity {
                 .setNegativeButton("Cancel", null)
                 .show();
         Theme.styleDialog(dialog, Theme.PRIMARY);
-        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v -> {
+        dialog.getButton(Popup.BUTTON_NEUTRAL).setOnClickListener(v -> {
             addressField.setText("");
             addressField.setHint("Looking up address…");
             lookupAddress(lat, lon, addressField);
         });
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        dialog.getButton(Popup.BUTTON_POSITIVE).setOnClickListener(v -> {
             String address = addressField.getText().toString().trim();
             if (address.isEmpty()) {
                 addressField.setError("Enter the house address");
@@ -3842,13 +4173,13 @@ public final class LoginActivity extends Activity {
         if (confirmedAddress == null) lookupAddress(lat, lon, addressField);
     }
 
-    private void confirmNotOnLunchThenStartDoor(Long pointId, double lat, double lon, String address, AlertDialog sourceDialog) {
+    private void confirmNotOnLunchThenStartDoor(Long pointId, double lat, double lon, String address, Popup sourceDialog) {
         String today = java.time.LocalDate.now().toString();
         try {
             request("timeclock/day", new JSONObject().put("token", token).put("work_date", today), null, r -> {
                 String state = finalDayState(r.getJSONArray("events"));
                 if ("lunch".equals(state) || "break".equals(state)) {
-                    new AlertDialog.Builder(this)
+                    new Popup.Builder(this)
                             .setTitle("Still on " + state)
                             .setMessage("You're still clocked in on " + state + ". Start this door anyway?")
                             .setPositiveButton("Yes, start it", (d, w) -> {
@@ -3938,7 +4269,7 @@ public final class LoginActivity extends Activity {
                 loadDoorsMap();
             }, false, (status, problem) -> {
                 if (status != 409) return false;
-                new AlertDialog.Builder(this)
+                new Popup.Builder(this)
                         .setCustomTitle(Theme.dialogTitle(this, "House not on the list", Theme.WARNING))
                         .setMessage(problem)
                         .setPositiveButton("It's a new house", (d, w) -> submitStartDoor(pointId, lat, lon, address, true))
@@ -3981,7 +4312,7 @@ public final class LoginActivity extends Activity {
             intent.addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             startActivityForResult(intent, REQUEST_TAKE_DOORS_PHOTO);
         } catch (Exception e) {
-            new AlertDialog.Builder(this).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try again.").setPositiveButton("OK", null).show();
+            new Popup.Builder(this).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try again.").setPositiveButton("OK", null).show();
         }
     }
 
@@ -4035,7 +4366,7 @@ public final class LoginActivity extends Activity {
                 // close this out instead of it being stuck open forever. The server already
                 // tolerates this: a far-away photo is recorded and flagged for manager review,
                 // never rejected, so "Finish anyway" just uses the path that already exists.
-                AlertDialog dialog = new AlertDialog.Builder(this)
+                Popup dialog = new Popup.Builder(this)
                         .setCustomTitle(Theme.dialogTitle(this, "That looks too far from the house", Theme.WARNING))
                         .setMessage("This photo was taken about " + Math.round(distance) + "m from where you started this door. If you're still there, retake it closer. If you've already left, you can still finish it — this will be flagged for your manager to review.")
                         .setPositiveButton("Retake photo", (d, which) -> beginFinishDoor())
@@ -4065,14 +4396,14 @@ public final class LoginActivity extends Activity {
         container.setPadding(pad, pad / 2, pad, 0);
         container.addView(reasonField);
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        Popup dialog = new Popup.Builder(this)
                 .setCustomTitle(Theme.dialogTitle(this, "Why are you finishing this away from the door?", Theme.WARNING))
                 .setView(container)
                 .setPositiveButton("Continue", null)
                 .setNegativeButton("Cancel", null)
                 .show();
         Theme.styleDialog(dialog, Theme.WARNING);
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        dialog.getButton(Popup.BUTTON_POSITIVE).setOnClickListener(v -> {
             String reason = reasonField.getText().toString().trim();
             if (reason.isEmpty()) {
                 reasonField.setError("Enter a reason");
@@ -4159,14 +4490,14 @@ public final class LoginActivity extends Activity {
             noteField.setHint("other".equals(tag) ? "Reason (required)" : "Note (optional)");
         });
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
+        Popup dialog = new Popup.Builder(this)
                 .setCustomTitle(Theme.dialogTitle(this, "Finish this door", Theme.SUCCESS))
                 .setView(container)
                 .setPositiveButton("Save", null)
                 .setNegativeButton("Cancel", null)
                 .show();
         Theme.styleDialog(dialog, Theme.SUCCESS);
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+        dialog.getButton(Popup.BUTTON_POSITIVE).setOnClickListener(v -> {
             int checkedId = radioGroup.getCheckedRadioButtonId();
             String status = "sold";
             if (checkedId != -1) {
@@ -4201,14 +4532,14 @@ public final class LoginActivity extends Activity {
             // otherwise queue successfully and then fail every future drain attempt forever, blocking
             // every other queued door behind it since drain() stops at the first failure it hits.
             if (bytes.length > 8 * 1024 * 1024) {
-                new AlertDialog.Builder(this).setTitle("Finish door").setMessage("That photo is too large. Please retake it.").setPositiveButton("OK", null).show();
+                new Popup.Builder(this).setTitle("Finish door").setMessage("That photo is too large. Please retake it.").setPositiveButton("OK", null).show();
                 return;
             }
             try (OutputStream out = new FileOutputStream(durablePhoto)) {
                 out.write(bytes);
             }
         } catch (IOException e) {
-            new AlertDialog.Builder(this).setTitle("Finish door").setMessage("Unable to save the photo. Try again.").setPositiveButton("OK", null).show();
+            new Popup.Builder(this).setTitle("Finish door").setMessage("Unable to save the photo. Try again.").setPositiveButton("OK", null).show();
             return;
         }
         capturedPhoto.delete();
@@ -4935,7 +5266,7 @@ public final class LoginActivity extends Activity {
         reasonParams.topMargin = (int) (12 * density);
         form.addView(reason, reasonParams);
 
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle(isToday ? "Edit today's times" : "Edit this day's times")
                 .setView(scroll)
                 .setPositiveButton("Save", (d, w) -> {
@@ -4947,7 +5278,7 @@ public final class LoginActivity extends Activity {
                     }
                     if (changed.isEmpty()) return;
                     if (note.isEmpty()) {
-                        new AlertDialog.Builder(this).setTitle("Reason required").setMessage("Enter a reason for the change.").setPositiveButton("OK", null).show();
+                        new Popup.Builder(this).setTitle("Reason required").setMessage("Enter a reason for the change.").setPositiveButton("OK", null).show();
                         return;
                     }
                     submitTimeEditQueue(dateKey, container, withinWindow, nextStart, zone, holders, originalEventIds, changed, 0, note, isToday);
@@ -5034,7 +5365,7 @@ public final class LoginActivity extends Activity {
             request("telemapper/disposition/active", new JSONObject().put("token", token), null, r -> {
                 if (!r.isNull("active")) {
                     String address = r.getJSONObject("active").optString("address", "a door");
-                    new AlertDialog.Builder(this)
+                    new Popup.Builder(this)
                             .setTitle("Finish that door first?")
                             .setMessage("You have an ongoing visit at " + address + ". Did you finish that door yet?")
                             .setPositiveButton("Yes, go to " + label, (d, w) -> doPunchTimeClock(dateKey, eventType, button, container, withinWindow, nextStart, zone, isToday))
@@ -5067,7 +5398,7 @@ public final class LoginActivity extends Activity {
                 }
                 if (openSite != null) {
                     String site = openSite;
-                    new AlertDialog.Builder(this)
+                    new Popup.Builder(this)
                             .setTitle("Check out first?")
                             .setMessage("You're still checked in at " + site + ". Did you check out before going on " + label + "?")
                             .setPositiveButton("Yes, go to " + label, (d, w) -> doPunchTimeClock(dateKey, eventType, button, container, withinWindow, nextStart, zone, isToday))
@@ -5094,7 +5425,7 @@ public final class LoginActivity extends Activity {
         input.setHint("What's wrong with this day's record?");
         input.setMinLines(2);
         Theme.styleInput(input);
-        new AlertDialog.Builder(this)
+        new Popup.Builder(this)
                 .setTitle("Flag a conflict")
                 .setView(input)
                 .setPositiveButton("Submit", (d, w) -> {
@@ -5127,7 +5458,7 @@ public final class LoginActivity extends Activity {
             startTracking();
             return;
         }
-        new AlertDialog.Builder(this).setTitle("Work location reporting")
+        new Popup.Builder(this).setTitle("Work location reporting")
                 .setMessage("Allow location and notifications to record your work route every " + (TrackingService.POLL_INTERVAL_MS / 1000) + " seconds, including while this app is minimized. Recruiters can view your daily route. A tracking notification stays visible; sign out or use its Stop action to end tracking.")
                 .setPositiveButton("Continue", (dialog, which) -> {
                     if (android.os.Build.VERSION.SDK_INT >= 33)
@@ -5173,7 +5504,7 @@ public final class LoginActivity extends Activity {
         if (location && notifications) startTracking();
         else {
             TrackingService.status = "Tracking is off. Enable Location and Notifications in app settings.";
-            new AlertDialog.Builder(this).setMessage(TrackingService.status).setPositiveButton("App settings", (d, w) -> startActivity(new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + getPackageName())))).setNegativeButton("Cancel", null).show();
+            new Popup.Builder(this).setMessage(TrackingService.status).setPositiveButton("App settings", (d, w) -> startActivity(new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + getPackageName())))).setNegativeButton("Cancel", null).show();
         }
     }
 
@@ -5278,7 +5609,7 @@ public final class LoginActivity extends Activity {
                         showLogin();
                     }
                     if (onProblem != null && onProblem.handle(status, problem)) return;
-                    new AlertDialog.Builder(this).setTitle("Employee sign-in").setMessage(problem).setPositiveButton("OK", null).show();
+                    new Popup.Builder(this).setTitle("Employee sign-in").setMessage(problem).setPositiveButton("OK", null).show();
                     return;
                 }
                 try {

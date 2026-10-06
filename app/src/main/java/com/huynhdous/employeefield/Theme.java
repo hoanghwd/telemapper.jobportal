@@ -209,7 +209,7 @@ final class Theme {
         return bg;
     }
 
-    /** A dialog title row: a small colored accent dot beside bold text, in place of AlertDialog's plain default title. */
+    /** A dialog title row: a small colored accent dot beside bold text, in place of a plain default title (used with Popup.Builder.setCustomTitle). */
     static android.view.View dialogTitle(Context ctx, String text, int accentColor) {
         float density = ctx.getResources().getDisplayMetrics().density;
         LinearLayout row = new LinearLayout(ctx);
@@ -236,21 +236,8 @@ final class Theme {
         return row;
     }
 
-    /** Rounds an already-shown AlertDialog's window and tints its buttons to match the app's palette. */
-    static void styleDialog(android.app.AlertDialog dialog, int positiveColor) {
-        if (dialog.getWindow() != null) {
-            float density = dialog.getContext().getResources().getDisplayMetrics().density;
-            GradientDrawable bg = new GradientDrawable();
-            bg.setColor(SURFACE);
-            bg.setCornerRadius(20 * density);
-            dialog.getWindow().setBackgroundDrawable(bg);
-        }
-        android.widget.Button positive = dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
-        if (positive != null) {
-            positive.setTextColor(positiveColor);
-            positive.setTypeface(positive.getTypeface(), Typeface.BOLD);
-        }
-        android.widget.Button negative = dialog.getButton(android.app.AlertDialog.BUTTON_NEGATIVE);
-        if (negative != null) negative.setTextColor(NEUTRAL);
+    /** Colours an already-shown Popup's main button (blue by default; e.g. red for a warning). The card itself is styled by Popup. */
+    static void styleDialog(Popup dialog, int positiveColor) {
+        if (positiveColor != PRIMARY) dialog.setPositiveColor(positiveColor);
     }
 }

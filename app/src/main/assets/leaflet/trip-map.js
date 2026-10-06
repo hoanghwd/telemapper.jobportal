@@ -133,6 +133,20 @@
         } else if (area.getLayers().length) fit(area); else if (points.length) fit(route); else map.setView([20, 0], 2);
         const soldCount = (typeof dispositions !== 'undefined' ? dispositions : []).filter(dd => dd.status === 'sold').length;
         status.textContent = (points.length ? 'Blue: GPS trail · Green: assigned territory' : 'No recorded positions for this date.') + (soldCount ? ' · ★ ' + soldCount + ' sold today' : '');
+        // Called from Android (the "Where am I" button) -- GPS access lives on that side; this drops a green marker at the
+        // rep's current position and flies there so he never has to hunt for himself on the map.
+        let myLocationMarker = null;
+        window.locateMe = function (lat, lon) {
+            if (myLocationMarker) map.removeLayer(myLocationMarker);
+            myLocationMarker = L.circleMarker([lat, lon], {
+                radius: 10,
+                color: '#fff',
+                fillColor: '#16a34a',
+                fillOpacity: 1,
+                weight: 3
+            }).addTo(map).bindPopup('<strong>You are here</strong>').openPopup();
+            map.flyTo([lat, lon], 18, {duration: 0.6});
+        };
         window.addEventListener('resize', () => map.invalidateSize());
         setTimeout(() => map.invalidateSize(), 150);
     } catch (e) {
