@@ -38,4 +38,42 @@ public class SessionWorkTest {
             assertFalse(a.matches(b.token, 2));
         }
     }
+
+    @Test public void outcomesAreKeptPerSessionAndKindAndTakenOnce() {
+        String token = "outcome-test-a";
+        SessionWork.postOutcome(token, new SessionWork.Outcome("checkin", true, false, null));
+        SessionWork.postOutcome(token, new SessionWork.Outcome("photo", false, true, "No signal"));
+        assertTrue(SessionWork.takeOutcomes("someone-else", "checkin").isEmpty());
+        java.util.List<SessionWork.Outcome> photos = SessionWork.takeOutcomes(token, "photo");
+        assertEquals(1, photos.size());
+        assertEquals("No signal", photos.get(0).message);
+        assertTrue(photos.get(0).retryable);
+        assertTrue(SessionWork.takeOutcomes(token, "photo").isEmpty());
+        assertEquals(1, SessionWork.takeOutcomes(token, "checkin").size());
+    }
+
+    @Test public void signOutDropsWaitingOutcomesAndRefusesNewOnes() {
+        String token = "outcome-test-b";
+        SessionWork.postOutcome(token, new SessionWork.Outcome("door", true, true, null));
+        SessionWork.end(token);
+        assertTrue(SessionWork.takeOutcomes(token, "door").isEmpty());
+        SessionWork.postOutcome(token, new SessionWork.Outcome("door", true, true, null));
+        assertTrue(SessionWork.takeOutcomes(token, "door").isEmpty());
+    }
+
+    @Test public void liveScreenIsWokenWhenAnOutcomeArrives() {
+        final int[] woken = {0};
+        Runnable listener = () -> woken[0]++;
+        SessionWork.setOutcomeListener(listener);
+        try {
+            SessionWork.postOutcome("outcome-test-c", new SessionWork.Outcome("avatar", true, true, null));
+            assertEquals(1, woken[0]);
+        } finally {
+            SessionWork.removeOutcomeListener(listener);
+            SessionWork.takeOutcomes("outcome-test-c", "avatar");
+        }
+        SessionWork.postOutcome("outcome-test-c", new SessionWork.Outcome("avatar", true, true, null));
+        assertEquals(1, woken[0]);   // no listener any more
+        SessionWork.takeOutcomes("outcome-test-c", "avatar");
+    }
 }

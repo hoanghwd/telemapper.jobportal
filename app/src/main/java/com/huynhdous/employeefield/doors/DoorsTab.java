@@ -30,6 +30,10 @@ import javax.net.ssl.HttpsURLConnection;
  */
 public final class DoorsTab extends TabModule {
     static final int REQUEST_START_HERE_LOCATION_PERMISSION = 63;
+    /** Height of the map under the start buttons (it was 320; one and a half times that). */
+    private static final int MAP_HEIGHT_DP = 480;
+    /** What the line under the title says when no door is open. */
+    static final String IDLE_MESSAGE = "Tap your position on the map below, closest to the house, to start a door — or use \"Start a New Door Here\" if none is close enough.";
     // The camera app can make Android close this app while it is open: without saving these, the recreated screen forgets which door was
     // open and the photo that was just taken ("photo not saved" although the photo is fine).
     private static final String STATE_ACTIVE_DISPOSITION_ID = "active_disposition_id";
@@ -49,7 +53,6 @@ public final class DoorsTab extends TabModule {
 
     TextView messageText;
     private TextView doorsProgramText;
-    private Button doorsPreviewRouteButton;
     private TextView doorsTimerText;
     private TextView doorsAddressText;
     private Button doorsFinishButton;
@@ -203,24 +206,9 @@ public final class DoorsTab extends TabModule {
         doorsMapView.getSettings().setJavaScriptEnabled(true);
         doorsMapView.setWebViewClient(new android.webkit.WebViewClient());
         protectMapGestures(doorsMapView);
-        doorsMapView.addJavascriptInterface(new TripMap.Bridge(host), "AndroidBridge");
-        LinearLayout.LayoutParams doorsMapParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (int) (320 * density));
+        doorsMapView.addJavascriptInterface(new TripMap.PreviewBridge(host, doorsMapView, () -> loadDoors(), () -> routes.previewRoute()), "AndroidBridge");
+        LinearLayout.LayoutParams doorsMapParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (int) (MAP_HEIGHT_DP * density));
         doorsMapCard.addView(doorsMapView, doorsMapParams);
-
-        // Same two buttons as My Trip: Refresh reloads the map, today's doors and the leads; Where am I drops a dot on the fresh position.
-        LinearLayout doorsButtonRow = new LinearLayout(activity);
-        doorsButtonRow.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams doorsButtonRowParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        doorsButtonRowParams.topMargin = (int) (8 * density);
-        doorsMapCard.addView(doorsButtonRow, doorsButtonRowParams);
-        LinearLayout doorsRefresh = Theme.iconTextButton(activity, R.drawable.ic_refresh, "Refresh", Theme.PRIMARY);
-        doorsButtonRow.addView(doorsRefresh);
-        doorsRefresh.setOnClickListener(v -> loadDoors());
-        LinearLayout doorsWhereAmI = Theme.iconTextButton(activity, R.drawable.ic_tab_location, "Where am I", Theme.PRIMARY);
-        LinearLayout.LayoutParams doorsWhereParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        doorsWhereParams.leftMargin = (int) (8 * density);
-        doorsButtonRow.addView(doorsWhereAmI, doorsWhereParams);
-        doorsWhereAmI.setOnClickListener(v -> TripMap.showWhereAmI(activity, doorsMapView));
 
         TextView doorsReportTitle = new TextView(activity);
         doorsReportTitle.setText("Today's Doors");
@@ -237,21 +225,17 @@ public final class DoorsTab extends TabModule {
         doorsReportContainerParams.topMargin = (int) (6 * density);
         doorsTabContent.addView(doorsReportContainer, doorsReportContainerParams);
 
-
         leads = new MyLeads(this, doorsTabContent);
-
-        // Lets a rep see the whole day's walk order before he leaves -- the route the office already built, read-only. Last on the screen.
-        doorsPreviewRouteButton = Theme.filledButton(activity, "▶ Preview Route", Theme.PRIMARY);
-        LinearLayout.LayoutParams doorsPreviewRouteParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        doorsPreviewRouteParams.topMargin = (int) (18 * density);
-        doorsPreviewRouteParams.bottomMargin = (int) (8 * density);
-        doorsTabContent.addView(doorsPreviewRouteButton, doorsPreviewRouteParams);
-        doorsPreviewRouteButton.setOnClickListener(v -> routes.previewRoute());
     }
 
     @Override
     public void onShown() {
         loadDoors();
+    }
+
+    @Override
+    public void onUploadOutcome() {
+        finisher.takeOutcomes();
     }
 
     @Override
@@ -270,7 +254,6 @@ public final class DoorsTab extends TabModule {
         if (queue != null) queue.close();
         messageText = null;
         doorsProgramText = null;
-        doorsPreviewRouteButton = null;
         doorsTimerText = null;
         doorsAddressText = null;
         doorsFinishButton = null;
@@ -522,7 +505,7 @@ public final class DoorsTab extends TabModule {
         activeDoorLat = null;
         activeDoorLon = null;
         finisher.clearPhoto();
-        messageText.setText("Tap your position on the map below, closest to the house, to start a door — or use \"Start a New Door Here\" if none is close enough.");
+        messageText.setText(IDLE_MESSAGE);
         doorsAddressText.setVisibility(View.GONE);
         doorsTimerText.setVisibility(View.GONE);
         doorsFinishButton.setVisibility(View.GONE);

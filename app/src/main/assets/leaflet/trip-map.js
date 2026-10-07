@@ -117,15 +117,24 @@
             if (group.getLayers().length) map.fitBounds(group.getBounds(), {padding: [25, 25], maxZoom: 16});
         }
 
-        document.getElementById('start').disabled = !first;
         document.getElementById('fit').disabled = !points.length;
         document.getElementById('area').disabled = !area.getLayers().length;
-        document.getElementById('start').onclick = () => {
-            map.setView(first.getLatLng(), 17);
-            first.openPopup();
+        // "Where am I": the Android side reads a fresh position and calls window.locateMe (below) with it.
+        document.getElementById('where').onclick = () => {
+            if (window.AndroidBridge && typeof window.AndroidBridge.whereAmI === 'function') window.AndroidBridge.whereAmI();
+        };
+        // "Refresh": the Android side reloads the screen's data, which redraws this map.
+        document.getElementById('refresh').onclick = () => {
+            if (window.AndroidBridge && typeof window.AndroidBridge.refresh === 'function') window.AndroidBridge.refresh();
         };
         document.getElementById('fit').onclick = () => fit(route);
         document.getElementById('area').onclick = () => fit(area);
+        // The D2D screen also offers "Preview the route" in this toolbar (its bridge has previewRoute); My Trip does not.
+        if (window.AndroidBridge && typeof window.AndroidBridge.previewRoute === 'function') {
+            const preview = document.getElementById('preview');
+            preview.style.display = 'flex';
+            preview.onclick = () => window.AndroidBridge.previewRoute();
+        }
         // A door in progress is where the rep is standing right now — jump straight there, same as the
         // "You are here" location screen, instead of zooming out to fit the whole day's trail.
         if (activeMarker) {

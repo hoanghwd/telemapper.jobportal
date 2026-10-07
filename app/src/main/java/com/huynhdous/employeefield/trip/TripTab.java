@@ -28,7 +28,6 @@ public final class TripTab extends TabModule {
     private TextView status;
     private Button dateButton;
     private java.time.LocalDate date;
-    private View buttonRow;
     private android.view.ViewTreeObserver.OnGlobalLayoutListener fitListener;
     private TextView trackingStatus;
     private Button enableTrackingButton;
@@ -105,26 +104,11 @@ public final class TripTab extends TabModule {
         mapView.getSettings().setJavaScriptEnabled(true);
         mapView.setWebViewClient(new android.webkit.WebViewClient());
         // Only ever loaded with our own bundled HTML/JS via loadDataWithBaseURL, never remote/untrusted content, so exposing a JS interface is safe.
-        mapView.addJavascriptInterface(new TripMap.Bridge(host()), "AndroidBridge");
+        mapView.addJavascriptInterface(new TripMap.Bridge(host(), mapView, this::load), "AndroidBridge");
         LinearLayout.LayoutParams mapParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (int) (320 * density));
         card.addView(mapView, mapParams);
 
-        LinearLayout row = new LinearLayout(context());
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        rowParams.topMargin = (int) (8 * density);
-        content.addView(row, rowParams);
-        LinearLayout refresh = Theme.iconTextButton(context(), R.drawable.ic_refresh, "Refresh", Theme.PRIMARY);
-        row.addView(refresh);
-        refresh.setOnClickListener(v -> load());
-        LinearLayout whereAmI = Theme.iconTextButton(context(), R.drawable.ic_tab_location, "Where am I", Theme.PRIMARY);
-        LinearLayout.LayoutParams whereParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        whereParams.leftMargin = (int) (8 * density);
-        row.addView(whereAmI, whereParams);
-        whereAmI.setOnClickListener(v -> showWhereAmI());
-        buttonRow = row;
-
-        // The map takes whatever height is left, so Refresh sits just above the bottom of the screen (re-fitted whenever the layout changes).
+        // The map takes whatever height is left, down to just above the bottom of the screen (re-fitted whenever the layout changes).
         fitListener = this::fitMapToScreen;
         content.getViewTreeObserver().addOnGlobalLayoutListener(fitListener);
     }
@@ -164,7 +148,6 @@ public final class TripTab extends TabModule {
         mapView = null;
         status = null;
         dateButton = null;
-        buttonRow = null;
         date = null;
     }
 
@@ -189,15 +172,10 @@ public final class TripTab extends TabModule {
         status.setText(points.length() + " position" + (points.length() == 1 ? "" : "s") + " recorded on " + dateLabel().replace("Trip date: ", ""));
     }
 
-    /** "Where am I": the map jumps to a fresh position and marks it (shared with the D2D screen's map). */
-    private void showWhereAmI() {
-        TripMap.showWhereAmI(context(), mapView);
-    }
-
     /** Stretches the map so the buttons below it end just above the bottom of the screen: the room left in the scroll area, minus what
      * sits above the map and the card padding / button row / panel padding below it. */
     private void fitMapToScreen() {
-        if (mapView == null || buttonRow == null || content == null || content.getVisibility() != View.VISIBLE) return;
+        if (mapView == null || content == null || content.getVisibility() != View.VISIBLE) return;
         ScrollView scroll = null;
         for (android.view.ViewParent p = mapView.getParent(); p != null; p = p.getParent()) {
             if (p instanceof ScrollView) { scroll = (ScrollView) p; break; }
@@ -212,10 +190,8 @@ public final class TripTab extends TabModule {
             v = (View) v.getParent();
         }
         float density = density();
-        ViewGroup.MarginLayoutParams rowParams = (ViewGroup.MarginLayoutParams) buttonRow.getLayoutParams();
-        int rowHeight = buttonRow.getHeight() > 0 ? buttonRow.getHeight() : (int) (48 * density);
         LinearLayout card = (LinearLayout) mapView.getParent();
-        int below = card.getPaddingBottom() + rowParams.topMargin + rowHeight + scrollContent.getPaddingBottom();
+        int below = card.getPaddingBottom() + scrollContent.getPaddingBottom();
         int available = scroll.getHeight() - scroll.getPaddingTop() - scroll.getPaddingBottom() - top - below;
         int target = Math.max((int) (240 * density), Math.min(available, (int) (900 * density)));
         ViewGroup.LayoutParams params = mapView.getLayoutParams();

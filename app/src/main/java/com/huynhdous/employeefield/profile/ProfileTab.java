@@ -274,14 +274,28 @@ public final class ProfileTab extends TabModule {
             String problem = error;
             context().runOnUiThread(() -> {
                 uploading = false;
-                if (!host().isCurrent(work)) return;
-                if (problem != null) {
-                    new Popup.Builder(context()).setTitle("Upload photo").setMessage(problem).setPositiveButton("OK", null).show();
-                } else {
-                    if (avatarView != null) Avatars.load(context(), host().token(), avatarView);
-                    host().avatarChanged();
+                if (!host().isCurrent(work)) {
+                    // The screen was recreated (a rotation) while this was uploading: the screen that replaced it shows the result.
+                    host().leaveOutcome(work, new com.huynhdous.employeefield.core.session.SessionWork.Outcome("avatar", problem == null, true, problem));
+                    return;
                 }
+                showAvatarResult(problem);
             });
         }).start();
+    }
+
+    /** The upload ended with {@code problem} (null = it worked). */
+    private void showAvatarResult(String problem) {
+        if (problem != null) {
+            new Popup.Builder(context()).setTitle("Upload photo").setMessage(problem).setPositiveButton("OK", null).show();
+        } else {
+            if (avatarView != null) Avatars.load(context(), host().token(), avatarView);
+            host().avatarChanged();
+        }
+    }
+
+    @Override
+    public void onUploadOutcome() {
+        for (com.huynhdous.employeefield.core.session.SessionWork.Outcome o : com.huynhdous.employeefield.core.session.SessionWork.takeOutcomes(host().token(), "avatar")) showAvatarResult(o.success ? null : o.message);
     }
 }

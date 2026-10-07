@@ -228,21 +228,37 @@ final class PhotoFix {
             String problem = error;
             context().runOnUiThread(() -> {
                 uploading = false;
-                if (!host.isCurrent(work)) return;
-                message.accept("");
-                if (problem != null) {
-                    // Keep the picture so a dropped connection doesn't mean taking it again.
-                    new Popup.Builder(context())
-                            .setTitle("Photo not saved")
-                            .setMessage(problem)
-                            .setPositiveButton("Try again", (d, w) -> upload())
-                            .setNegativeButton("Cancel", (d, w) -> pendingFile = null)
-                            .show();
-                } else {
-                    pendingFile = null;
-                    changed.run();
+                if (!host.isCurrent(work)) {
+                    // The screen was recreated (a rotation) while this was uploading: the screen that replaced it shows the result.
+                    host.leaveOutcome(work, new com.huynhdous.employeefield.core.session.SessionWork.Outcome("photo", problem == null, true, problem));
+                    return;
                 }
+                showResult(problem);
             });
         }).start();
+    }
+
+    /** The upload ended with {@code problem} (null = it worked). */
+    private void showResult(String problem) {
+        message.accept("");
+        if (problem != null) {
+            // Keep the picture so a dropped connection doesn't mean taking it again.
+            new Popup.Builder(context())
+                    .setTitle("Photo not saved")
+                    .setMessage(problem)
+                    .setPositiveButton("Try again", (d, w) -> upload())
+                    .setNegativeButton("Cancel", (d, w) -> pendingFile = null)
+                    .show();
+        } else {
+            pendingFile = null;
+            changed.run();
+        }
+    }
+
+    /** Shows the result of an upload that finished while the screen was being recreated. */
+    void takeOutcomes() {
+        for (com.huynhdous.employeefield.core.session.SessionWork.Outcome o : com.huynhdous.employeefield.core.session.SessionWork.takeOutcomes(host.token(), "photo")) {
+            showResult(o.success ? null : o.message);
+        }
     }
 }

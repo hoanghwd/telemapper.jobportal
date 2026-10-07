@@ -85,6 +85,13 @@ public abstract class TabModule {
     public void onPermissionResult(int requestCode, String[] permissions, int[] results) {
     }
 
+    /**
+     * An upload that finished while this screen was being recreated has left its result (see {@code AppHost.leaveOutcome}); take yours with
+     * {@code SessionWork.takeOutcomes(host().token(), kind)} and show it. Also called once after all tabs are mounted.
+     */
+    public void onUploadOutcome() {
+    }
+
     /** The home screen is being torn down (sign-out or session end): let go of views and state. */
     public void onDetach() {
     }

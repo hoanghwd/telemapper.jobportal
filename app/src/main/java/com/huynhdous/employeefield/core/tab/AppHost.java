@@ -25,6 +25,14 @@ public interface AppHost {
         return !activity().isFinishing() && !activity().isDestroyed() && work.matches(token(), employeeId());
     }
 
+    /**
+     * An upload finished after the screen that started it was recreated (a rotation) but the sign-in is unchanged: leave its result for
+     * the new screen, which shows it from {@link TabModule#onUploadOutcome}.
+     */
+    default void leaveOutcome(com.huynhdous.employeefield.core.session.SessionWork.Lease work, com.huynhdous.employeefield.core.session.SessionWork.Outcome outcome) {
+        if (work.matches(token(), employeeId())) com.huynhdous.employeefield.core.session.SessionWork.postOutcome(work.token, outcome);
+    }
+
     /** "D2D" or "S2S" (door-to-door or in-store), as set by the office; may be null. */
     String programCode();
 

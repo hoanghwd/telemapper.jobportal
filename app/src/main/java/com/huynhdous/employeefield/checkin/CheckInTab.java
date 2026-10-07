@@ -43,6 +43,7 @@ public final class CheckInTab extends TabModule {
     private static final String STATE_STORE_PATH = "pending_store_path";
     private static final String STATE_ARRIVAL_ASSIGNMENT = "active_arrival_assignment";
     private static final String STATE_ACCEPTED_STORE_PATHS = "accepted_store_paths";
+    private static final String STATE_UNSENT = "check_in_unsent";
 
     private LinearLayout container;
     private TextView message;
@@ -59,6 +60,9 @@ public final class CheckInTab extends TabModule {
     /** Store photos already approved this check-in (not counting the one currently being reviewed). Capped at the app setting. */
     private final java.util.List<File> acceptedStorePhotos = new java.util.ArrayList<>();
     private boolean submitting;
+    /** The last attempt to send the check-in failed for lack of a connection: the photos are kept and can be sent again. */
+    private boolean unsent;
+    private LinearLayout unsentCardView;
 
     @Override
     public String title() {
@@ -134,6 +138,7 @@ public final class CheckInTab extends TabModule {
 
     /** Forget the check-in in progress. */
     private void clearFlow() {
+        unsent = false;
         activeAssignment = null;
         activeLat = null;
         activeLon = null;
@@ -159,6 +164,7 @@ public final class CheckInTab extends TabModule {
             out.putDouble(STATE_LAT, activeLat);
             out.putDouble(STATE_LON, activeLon);
         }
+        if (unsent) out.putBoolean(STATE_UNSENT, true);
         if (photoFix != null) photoFix.saveState(out);
     }
 
@@ -195,6 +201,7 @@ public final class CheckInTab extends TabModule {
             activeLat = state.getDouble(STATE_LAT);
             activeLon = state.getDouble(STATE_LON);
         }
+        unsent = state.getBoolean(STATE_UNSENT, false) && activeAssignment != null && !acceptedStorePhotos.isEmpty();
         if (photoFix != null) photoFix.restoreState(state);
     }
 
@@ -314,6 +321,8 @@ public final class CheckInTab extends TabModule {
     private void render(JSONArray assignments) throws Exception {
         if (container == null) return;
         container.removeAllViews();
+        unsentCardView = null;
+        showUnsentCardIfAny();
         if (assignments.length() == 0) {
             message.setText("No worksite assigned for today.");
             return;
@@ -703,6 +712,8 @@ public final class CheckInTab extends TabModule {
                             && a.optString("source", "worksite").equals(pending.optString("source", "worksite"))) {
                         if (a.optBoolean("checked_in") && !a.optBoolean("checked_out")) {
                             clearFlow();
+                            setMessage("");
+                            new Popup.Builder(context()).setTitle("Checked in").setMessage("Your check-in did go through the first time.").setPositiveButton("OK", null).show();
                             render(assignments);
                             return;
                         }
@@ -712,7 +723,9 @@ public final class CheckInTab extends TabModule {
                 }
                 setMessage("The assignment has changed. Please refresh before checking in again.");
             });
-        } catch (Exception e) { setMessage("Unable to check status. Your photos are kept."); }
+        } catch (Exception e) {
+            setMessage("Unable to check the status. Your photos are kept; use Send now to try again.");
+        }
     }
 
     private void submit() {
@@ -742,6 +755,9 @@ public final class CheckInTab extends TabModule {
             return;
         }
         submitting = true;
+        unsent = false;
+        showUnsentCardIfAny();
+        final boolean[] retryable = {false};
         final JSONObject assignment = activeAssignment;
         final android.net.Uri selfieUri = pendingSelfieUri;
         final File selfieFile = pendingSelfieFile;
@@ -790,33 +806,129 @@ public final class CheckInTab extends TabModule {
                 InputStream stream = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
                 if (stream == null) throw new IOException();
                 JSONObject resp = new JSONObject(new String(Api.readAllBytes(stream), StandardCharsets.UTF_8));
-                if (code < 200 || code >= 300 || !resp.optBoolean("success")) error = resp.optString("message", "Unable to check in.");
+                if (code < 200 || code >= 300 || !resp.optBoolean("success")) {
+                    error = resp.optString("message", "Unable to check in.");
+                    retryable[0] = code >= 500;   // a refusal (too far, already checked in ...) will not change by retrying; a server fault might
+                }
             } catch (Exception e) {
+                retryable[0] = !"TOO_LARGE".equals(e.getMessage());   // a connection problem can be retried; a photo that is too large cannot
                 error = "TOO_LARGE".equals(e.getMessage()) ? "That photo is too large." : "Unable to check in. Check your connection and try again.";
             } finally {
                 if (conn != null) conn.disconnect();
                 work.close();
             }
             String problem = error;
-            context().runOnUiThread(() -> finishSubmission(work, problem));
+            context().runOnUiThread(() -> finishSubmission(work, problem, retryable[0]));
         }).start();
     }
+    /** The upload ended with {@code problem} (null = it worked). Treated as retryable, i.e. the photos are kept. */
     void finishSubmission(com.huynhdous.employeefield.core.session.SessionWork.Lease work, String problem) {
-                submitting = false;
-                if (!host().isCurrent(work)) return;
-                setMessage("");
-                if (problem != null) {
-                    new Popup.Builder(context()).setTitle("Check-in not confirmed")
-                            .setMessage(problem + " Your photos are kept. Refresh to check whether the visit was saved before retrying.")
-                            .setPositiveButton("Refresh status", (d, w) -> load())
-                            .setNeutralButton("Try again", (d, w) -> retryAfterCheckingStatus())
-                            .setNegativeButton("Keep photos", null).show();
-                } else {
-                    clearFlow();
-                    new Popup.Builder(context()).setTitle("Checked in").setMessage("You're checked in. Have a great shift!").setPositiveButton("OK", null).show();
-                    load();
-                }
-
+        finishSubmission(work, problem, true);
     }
 
+    void finishSubmission(com.huynhdous.employeefield.core.session.SessionWork.Lease work, String problem, boolean retryable) {
+        submitting = false;
+        if (!host().isCurrent(work)) {
+            // The screen was recreated (a rotation) while this was uploading: the screen that replaced it shows the result.
+            host().leaveOutcome(work, new com.huynhdous.employeefield.core.session.SessionWork.Outcome("checkin", problem == null, retryable, problem));
+            return;
+        }
+        showResult(problem == null, retryable, problem);
+    }
+
+    /** What a check-in upload ended with: done; refused or hopeless (start over); or only a connection problem (the photos are kept). */
+    private void showResult(boolean success, boolean retryable, String problem) {
+        setMessage("");
+        if (success) {
+            clearFlow();
+            new Popup.Builder(context()).setTitle("Checked in").setMessage("You're checked in. Have a great shift!").setPositiveButton("OK", null).show();
+            load();
+        } else if (!retryable || activeAssignment == null || acceptedStorePhotos.isEmpty()) {
+            clearFlow();   // the server said no (or a photo is too large, or the photos are gone): starting over is the only way
+            showUnsentCardIfAny();
+            new Popup.Builder(context()).setTitle("Check in").setMessage(problem).setPositiveButton("OK", null).show();
+        } else {
+            unsent = true;   // a connection problem: the photos and the check-in details stay, and nothing has to be retaken
+            showUnsentDialog(problem);
+        }
+    }
+
+    @Override
+    public void onUploadOutcome() {
+        if (container == null) return;
+        String token = host().token();
+        for (com.huynhdous.employeefield.core.session.SessionWork.Outcome o : com.huynhdous.employeefield.core.session.SessionWork.takeOutcomes(token, "checkin")) {
+            showResult(o.success, o.retryable, o.message);
+        }
+        if (photoFix != null) photoFix.takeOutcomes();
+    }
+
+    // ---------------------------------------------------------------- a check-in that could not be sent
+
+    private void showUnsentDialog(String problem) {
+        showUnsentCardIfAny();
+        new Popup.Builder(context())
+                .setTitle("Check-in not sent")
+                .setMessage(problem + "\n\nYour photos are saved on this phone, so nothing has to be retaken. Try again now, or later from the card at the top of this screen.")
+                .setPositiveButton("Try again", (d, w) -> retryAfterCheckingStatus())
+                .setNegativeButton("Later", null)
+                .show();
+    }
+
+    /** Puts (or removes) the "check-in waiting to be sent" card at the top of the screen, so the retry is never out of reach. */
+    private void showUnsentCardIfAny() {
+        if (container == null) return;
+        if (unsentCardView != null) {
+            container.removeView(unsentCardView);
+            unsentCardView = null;
+        }
+        if (!unsent || activeAssignment == null) return;
+        float density = density();
+        LinearLayout card = new LinearLayout(context());
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding((int) (14 * density), (int) (12 * density), (int) (14 * density), (int) (12 * density));
+        card.setBackground(Theme.cardBackground(context()));
+        TextView title = new TextView(context());
+        title.setText("Check-in waiting to be sent");
+        title.setTextSize(15);
+        title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
+        title.setTextColor(Theme.WARNING);
+        card.addView(title);
+        TextView text = new TextView(context());
+        text.setText(activeAssignment.optString("site_name", "Your worksite") + " — your photos are saved on this phone. Send it when you have a signal.");
+        text.setTextSize(13);
+        text.setTextColor(Theme.TEXT_SECONDARY);
+        text.setPadding(0, (int) (4 * density), 0, (int) (8 * density));
+        card.addView(text);
+        LinearLayout buttons = new LinearLayout(context());
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        buttons.setGravity(Gravity.CENTER_VERTICAL);
+        Button send = Theme.filledButton(context(), "Send now", Theme.PRIMARY);
+        buttons.addView(send);
+        send.setOnClickListener(v -> retryAfterCheckingStatus());
+        TextView discard = new TextView(context());
+        discard.setText("Discard");
+        discard.setTextSize(14);
+        discard.setTypeface(discard.getTypeface(), android.graphics.Typeface.BOLD);
+        discard.setTextColor(Theme.TEXT_SECONDARY);
+        discard.setMinimumHeight((int) (48 * density));
+        discard.setGravity(Gravity.CENTER_VERTICAL);
+        discard.setPadding((int) (18 * density), 0, (int) (18 * density), 0);
+        discard.setClickable(true);
+        buttons.addView(discard);
+        discard.setOnClickListener(v -> new Popup.Builder(context())
+                .setTitle("Discard this check-in?")
+                .setMessage("The photos will be deleted from this phone and you will have to check in again from the start.")
+                .setPositiveButton("Discard", (d, w) -> {
+                    clearFlow();
+                    showUnsentCardIfAny();
+                })
+                .setNegativeButton("Keep it", null)
+                .show());
+        card.addView(buttons);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.bottomMargin = (int) (8 * density);
+        container.addView(card, 0, params);
+        unsentCardView = card;
+    }
 }

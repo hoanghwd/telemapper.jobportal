@@ -66,6 +66,7 @@ public final class TabManager {
     };
     private Runnable afterMenuPick = () -> {
     };
+    private Runnable outcomeListener;
 
     public TabManager(Activity activity, AppHost host, ScheduleGate gate) {
         this.activity = activity;
@@ -120,7 +121,17 @@ public final class TabManager {
         homeBuilt = true;
         restoredState = null;
         earlyResults.clear();
+        // An upload that finished while the screen was being recreated has left its result: tell the tabs now, and whenever one arrives.
+        if (outcomeListener == null) outcomeListener = () -> activity.runOnUiThread(this::dispatchOutcomes);
+        com.huynhdous.employeefield.core.session.SessionWork.setOutcomeListener(outcomeListener);
+        dispatchOutcomes();
     }
+
+    private void dispatchOutcomes() {
+        if (!homeBuilt) return;
+        for (Mounted m : new ArrayList<>(mounted.values())) m.module.onUploadOutcome();
+    }
+
 
     /** The menu rows for the tabs in {@code slots} (in that order) that this kind of employee gets. */
     public List<View> labels(String programCode, int... slots) {
@@ -201,6 +212,7 @@ public final class TabManager {
     }
 
     public void detachAll(boolean discardRecovery) {
+        com.huynhdous.employeefield.core.session.SessionWork.removeOutcomeListener(outcomeListener);
         for (Mounted m : mounted.values()) m.module.onDetach();
         mounted.clear();
         resultOwners.clear();

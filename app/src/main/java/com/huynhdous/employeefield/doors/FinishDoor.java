@@ -226,21 +226,62 @@ final class FinishDoor {
             }
             final String problem = error;
             activity.runOnUiThread(() -> {
-                if (!host.isCurrent(work) || tab.messageText == null) return;
-                if (problem != null) {
-                    new Popup.Builder(activity).setTitle("Finish door").setMessage(problem).setPositiveButton("OK", null).show();
+                if (!host.isCurrent(work)) {
+                    // The screen was recreated (a rotation) while this was saving: the screen that replaced it shows the result.
+                    host.leaveOutcome(work, new com.huynhdous.employeefield.core.session.SessionWork.Outcome("door", problem == null, true, problem));
                     return;
                 }
-                if (java.util.Objects.equals(tab.activeDispositionId, dispositionId)) tab.renderIdle();
-                tab.say("Door saved — uploading now…");
-                tab.loadDoorsMap();
+                if (tab.messageText == null) return;
+                showSaved(problem, dispositionId);
             });
             if (problem == null) {
+                int remaining;
                 DispositionQueue uploads = new DispositionQueue(activity.getApplicationContext());
-                try { uploads.drain(work.token, work.employeeId); }
-                finally { uploads.close(); }
+                try {
+                    uploads.drain(work.token, work.employeeId);
+                    remaining = uploads.pendingCountForEmployee(work.employeeId);
+                } catch (Exception e) {
+                    remaining = -1;   // could not tell: leave the screen as it is
+                } finally {
+                    uploads.close();
+                }
+                final int left = remaining;
+                if (left >= 0) activity.runOnUiThread(() -> showUploadProgress(work, left));
             }
         }).start();
+    }
+
+    /** The door was saved on the phone (or could not be): reset the screen to "no door open" and refresh the map. */
+    private void showSaved(String problem, int dispositionId) {
+        if (problem != null) {
+            new Popup.Builder(activity).setTitle("Finish door").setMessage(problem).setPositiveButton("OK", null).show();
+            return;
+        }
+        if (java.util.Objects.equals(tab.activeDispositionId, dispositionId)) tab.renderIdle();
+        tab.say("Door saved — uploading now…");
+        tab.loadDoorsMap();
+    }
+
+    /** The background upload of the waiting doors is over: say how many are still waiting, and refresh Today's Doors when all are in. */
+    private void showUploadProgress(com.huynhdous.employeefield.core.session.SessionWork.Lease work, int left) {
+        if (!host.isCurrent(work) || tab.messageText == null) return;
+        if (left == 0) tab.loadDoorsMap();   // the report now shows the finished outcome
+        if (tab.activeDispositionId != null) return;   // a new door is already open: leave its line alone
+        tab.say(left == 0 ? DoorsTab.IDLE_MESSAGE
+                : left + " door" + (left == 1 ? "" : "s") + " saved — will upload when you have a signal.");
+    }
+
+    /** Shows what a door save reported after the screen had been recreated. */
+    void takeOutcomes() {
+        for (com.huynhdous.employeefield.core.session.SessionWork.Outcome o : com.huynhdous.employeefield.core.session.SessionWork.takeOutcomes(host.token(), "door")) {
+            if (o.success) {
+                tab.renderIdle();   // the restored screen still showed the door as open
+                tab.say("Door saved — uploading now…");
+                tab.loadDoorsMap();
+            } else {
+                new Popup.Builder(activity).setTitle("Finish door").setMessage(o.message).setPositiveButton("OK", null).show();
+            }
+        }
     }
 
     private void showDoorsPhotoFailedDialog() {
