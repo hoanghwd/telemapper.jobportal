@@ -1,25 +1,91 @@
-# JbTelemapper — employee login and GPS tracking
+# Telemapper — the employee field app (Android)
 
-Version 0.3.0 connects to https://jobportal.huynhdous.com/api/employee/ over HTTPS.
+The phone app field employees use for their workday: sign in, confirm the week's schedule, clock in and out, track the route, knock doors (D2D) or check in at stores (S2S), and see their hours. It talks to the job portal at the address in `app/app-config.properties` (`https://jobportal.huynhdous.com/api/employee/`) over HTTPS.
 
-1. In the employee onboarding profile, use Login Credential → Generate login.
-2. Sign in on Android with the generated username and temporary password.
-3. The temporary password expires 24 hours after generation. The app requires a replacement password before access. Expired unused credentials can be renewed by a recruiter.
-4. Permanent passwords use 12–72 UTF-8 bytes. Tokens stay in memory. Reopening the activity can reuse its active tracking service; process termination or phone restart requires sign-in. Sign out stops tracking immediately and requests token revocation.
+Package `com.huynhdous.employeefield` · version in `app/build.gradle` (`versionName`) · minSdk 26, targetSdk/compileSdk 35 · Java 17.
 
-After login, allow precise location and notifications to start visible GPS reporting at a target interval of 30 seconds. The location foreground service continues with the screen locked and holds a wake lock. Its notification includes Stop and sign out. Android restrictions, poor GPS reception, or lost connectivity can cause gaps; exact 30-second delivery is not guaranteed. Access sessions expire after 12 hours.
+## What the employee can do
 
-Fresh positions include coordinates, capture time, accuracy, session ID, and simulated-location flag. A private SQLite queue survives connectivity interruptions, isolates records by employee, and retries uploads without duplicate records. Offline points expire after seven days; uploads resume when that same employee signs in.
+The menu (top-left) shows these screens, in this order. Some are only for one kind of employee, which the office sets on the web (Program Assignment).
 
-Recruiters use Reports → Employee GPS Trail to view the daily route and assign multiple worksites such as Costco and Walmart. The office timezone determines daily grouping, while stores are separate pins. Assignment pins do not prove attendance.
+| Screen | For | What it does |
+|---|---|---|
+| **Profile** | everyone | Name and profile photo (camera or gallery), and changing your own password. |
+| **Schedule** | everyone | The week's schedule, a daily time clock (clock in/out, meal and break), hours rings for today and the week. **The week's schedule must be confirmed first** — until then every other screen and all clock buttons are dimmed and a banner says so. |
+| **My Trip** | everyone | The day's recorded GPS trail on a map (any date), the assigned territory and door outcomes. A line at the top says whether location tracking is on (with a button to turn it on if the permission was refused). *Refresh* and *Where am I* sit under the map. |
+| **Time Sheet** | everyone | This week's worked hours: the total, whether the week is accepted, and each day (with in-progress, missing clock-out and conflict flags). |
+| **Events** | S2S | "My Events": the retail events a manager has staffed the rep to, with dates, location and what to promote. |
+| **D2D** | D2D | Door-to-door work: start a door from a map dot or *Start a New Door Here* (house confirmed, optional business name), the timer, *Finish* with a required photo and outcome, today's doors (tap one to correct it), doors that failed to upload ("Needs attention"), My Leads (callbacks), and *Preview Route* at the bottom. |
+| **Programs** | D2D | What the rep is selling right now (the program a manager assigned, while it is active). |
+| **Check In** | S2S | Today's worksite: *I'm Arrived* (GPS must be at the site, then selfie + store photo(s)), *I'm done*, and fixing photos afterwards (retake, delete, add a store photo). |
 
-Build in Android Studio with JVM 21, SDK 35: Build → Generate App Bundles or APKs → Generate APKs. Keep the existing application ID to update the installed prototype.
+### Sign-in and tracking
 
-Backend verification: 32 isolated GPS/worksite checks and 31 authentication checks passed. Android APK generation is blocked in the automation environment by Windows SDK access errors. Build in Android Studio, then test on a real phone:
+1. The office generates a login (Employee onboarding profile → Login Credential → Generate login). The first sign-in uses the temporary password and the app then requires a replacement (12–72 UTF-8 bytes).
+2. On the very first sign-in on a phone the employee must confirm a notice that the work location is shared with the office (asked once per employee on that phone; *Sign out* is the other choice).
+3. The app then asks for precise location and notifications and starts a visible foreground service that records GPS positions about as often as `tracking.positions_per_minute` says (default one per minute). It keeps running with the screen locked; its notification has a Stop action. Android restrictions, poor GPS reception or lost connectivity can cause gaps.
+4. Positions go into a private SQLite queue (`LocationQueue`) that survives connectivity loss, is kept per employee and retries without duplicates; points older than seven days are dropped. Positions carry coordinates, capture time, accuracy, session and a simulated-location flag.
+5. Tokens stay in memory. Reopening the app can continue a sign-in whose tracking service is still running; killing the process or restarting the phone requires signing in again. *Sign out* first sends any finished doors still waiting on the phone (or asks what to do if there is no signal), then stops tracking and revokes the token.
 
-1. Sign in, allow precise location and notifications, and confirm the tracking notification.
-2. Assign two stores to today in the report. Walk with the phone, including several minutes with its screen locked; enable 30-second map refresh and inspect capture timestamps.
-3. Disable/re-enable networking and confirm queued points upload only once.
-4. Sign out and verify no new captures. Old history remains visible.
+Finished doors work the same way offline-first: the photo and outcome are saved on the phone (`DispositionQueue`) and uploaded in the background; the server's final say (for example a repeat sale at an address) shows up under "Needs attention" where the rep can fix and retry.
 
-Emulator locations are flagged simulated and are not joined into a verified trail. Real-device screen-lock and battery tests remain required before employee rollout.
+## Settings — no addresses or limits in the code
+
+Every URL and tunable number is in **`app/app-config.properties`** (server address, map tiles, geocoder, tracking rate, photo size/quality, door-photo distance, store-photo limit, GPS wait, work-hour targets, meal-break reminder). The build turns each line into a constant in `core/config/Config`; a missing key stops the build with a clear message. To try a value only on your machine (for example a test server), put the key in `app/app-config.local.properties` (same folder; overrides the shared file).
+
+Keep that file plain ASCII with no BOM (write `&copy;` instead of ©) — editing it with Windows PowerShell 5.1 corrupts it.
+
+## How the code is organised
+
+Everything starts in **`main.java`** (the one Android screen). It does nothing but pass what Android tells it — start, pause, saved state, camera and permission answers, Back — to **`app/App`**, which wires the parts together and is the only thing the feature screens talk to.
+
+```
+main.java ──► app/App ─┬─ core/session/Session        who is signed in
+                       ├─ core/net/Requester          every server call (one at a time, error pop-ups, 401 = signed out)
+                       ├─ auth/AuthFlow               sign-in → change password → "who am I" → one-time notice → home
+                       │     SignInScreen · ChangePasswordScreen · TrackingNotice · SignOut
+                       ├─ location/TrackingStarter    asks for permissions, starts/stops TrackingService
+                       ├─ core/tab/TabManager         mounts the tabs, shows one, routes camera/permission answers back
+                       └─ home/HomeScreen             greeting card, title bar, schedule banner, menu, and the list of tabs
+```
+
+| Package | Contents |
+|---|---|
+| `app` | `App` — the coordinator. |
+| `auth` | Sign-in, change-password, first-sign-in notice, sign-out. |
+| `home` | `HomeScreen` (the tab list and menu order), `GreetingCard`, `GateBanner`, `Drawer`. |
+| `schedule` · `trip` · `timesheet` · `profile` · `events` · `programs` · `checkin` · `doors` | One feature each. A feature is a `TabModule` plus the classes it needs (e.g. `doors/`: `DoorsTab`, `StartDoor`, `FinishDoor`, `DoorEdit`, `FailedFinishes`, `RoutePreview`, `MyLeads`, `OutcomeForm`, `DispositionQueue`). |
+| `location` | `TrackingService` (background GPS), `LocationQueue`, `TrackingStarter`. |
+| `core/tab` | `TabModule` (what a screen must provide), `AppHost` (what a screen may ask of the app), `Tabs` (slot numbers), `TabManager`, `ScheduleGate`. |
+| `core/net` · `core/media` · `core/location` · `core/ui` · `core/config` · `core/session` | Shared code: server calls and multipart upload, photo shrinking and avatars, distance and GPS fixes, the look (`Theme`, `Popup`, `ActionSheet`, `Insets`), settings, session. |
+
+Rules of the layout: a feature never reaches into another feature or into `main`; if two features need the same thing it goes into `core`. Camera and permission answers are routed to the tab that asked, also after Android closed the app while the camera was open (each tab saves and restores its own state).
+
+**To add a screen:** make a package with a class extending `TabModule` (title, icon, `isAvailableFor`, `buildContent`, `onShown`, optional `requestCodes` / `saveState` / `restoreState`), give it a number in `core/tab/Tabs`, mount it in `HomeScreen.show()` and put it in `HomeScreen.MENU_ORDER`.
+
+The maps are small bundled web pages (`app/src/main/assets/leaflet/`) shown in a WebView; they only ever load our own HTML/JS.
+
+## Build, test, install
+
+Android Studio (JVM 17+, SDK 35), or from a terminal on Windows with Android Studio's bundled JDK:
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest --offline
+adb -s <phone-serial> install -r app\build\outputs\apk\debug\app-debug.apk
+```
+
+Keep the application ID (`com.huynhdous.employeefield`) so installs update the app already on the phone. If the phone is not on USB, use its wireless-debugging entry from `adb devices` as the serial. Unit tests cover the door-upload queue's decision logic (`doors/DispositionQueueDrainOutcomeTest`).
+
+## Testing on a real phone
+
+Emulator locations are flagged as simulated and are not joined into a verified trail, so use a real phone:
+
+1. Sign in, allow precise location and notifications, and confirm the tracking notification and the status line on My Trip.
+2. Confirm the week's schedule; clock in and out; check Time Sheet.
+3. Walk with the screen locked for several minutes and compare capture times in the web report (Reports → Employee GPS Trail).
+4. Turn the network off and on: queued points upload once.
+5. D2D: start a door, finish it with a photo, correct it, try one with no signal. S2S: check in at a site, fix a photo, check out.
+6. Sign out: tracking stops and no new positions arrive.
+
+Real-device screen-lock and battery tests remain required before an employee rollout.
