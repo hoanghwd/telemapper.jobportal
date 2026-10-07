@@ -1,4 +1,6 @@
-package com.huynhdous.employeefield;
+package com.huynhdous.employeefield.core.ui;
+
+import com.huynhdous.employeefield.R;
 
 import android.content.Context;
 import android.graphics.Canvas;
@@ -7,12 +9,12 @@ import android.graphics.RectF;
 import android.view.View;
 
 /** A small canvas-drawn ring showing worked minutes against a daily target — no drawable/XML needed. */
-final class DayProgressRing extends View {
+public final class DayProgressRing extends View {
     private float progress;
     private final Paint trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint progressPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    DayProgressRing(Context ctx) {
+    public DayProgressRing(Context ctx) {
         super(ctx);
         float density = ctx.getResources().getDisplayMetrics().density;
         float strokeWidth = 3.5f * density;
@@ -25,7 +27,7 @@ final class DayProgressRing extends View {
         progressPaint.setColor(Theme.SUCCESS);
     }
 
-    void setProgress(float fraction, int color) {
+    public void setProgress(float fraction, int color) {
         this.progress = Math.max(0f, Math.min(1f, fraction));
         progressPaint.setColor(color);
         invalidate();

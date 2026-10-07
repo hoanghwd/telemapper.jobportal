@@ -1,4 +1,6 @@
-package com.huynhdous.employeefield;
+package com.huynhdous.employeefield.core.ui;
+
+import com.huynhdous.employeefield.R;
 
 import android.content.Context;
 import android.graphics.Color;
@@ -12,24 +14,24 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /** Colors and small styled-view helpers borrowed from the Tracko app's "Corporate Modernism" design system. */
-final class Theme {
+public final class Theme {
     private Theme() {
     }
 
-    static final int PRIMARY = 0xff003fb1;
-    static final int PRIMARY_LIGHT = 0xff1a56db;
-    static final int SUCCESS = 0xff006e2f;
-    static final int WARNING = 0xfff59e0b;
-    static final int ERROR = 0xffba1a1a;
-    static final int NEUTRAL = 0xff737686;
-    static final int BACKGROUND = 0xfff8f9ff;
-    static final int SURFACE = 0xffffffff;
-    static final int TEXT_PRIMARY = 0xff0b1c30;
-    static final int TEXT_SECONDARY = 0xff434654;
-    static final int OUTLINE = 0xffe1e6f5;
+    public static final int PRIMARY = 0xff003fb1;
+    public static final int PRIMARY_LIGHT = 0xff1a56db;
+    public static final int SUCCESS = 0xff006e2f;
+    public static final int WARNING = 0xfff59e0b;
+    public static final int ERROR = 0xffba1a1a;
+    public static final int NEUTRAL = 0xff737686;
+    public static final int BACKGROUND = 0xfff8f9ff;
+    public static final int SURFACE = 0xffffffff;
+    public static final int TEXT_PRIMARY = 0xff0b1c30;
+    public static final int TEXT_SECONDARY = 0xff434654;
+    public static final int OUTLINE = 0xffe1e6f5;
 
     /** Applies the badge look (15% tint background, solid bold text, rounded pill) to an existing TextView. */
-    static void applyBadgeStyle(TextView badge, int color) {
+    public static void applyBadgeStyle(TextView badge, int color) {
         badge.setTextColor(color);
         badge.setTextSize(11);
         badge.setTypeface(badge.getTypeface(), Typeface.BOLD);
@@ -42,7 +44,7 @@ final class Theme {
     }
 
     /** A small status pill: 15% tint of `color` as background, solid `color` bold text — mirrors Tracko's StatusBadge. */
-    static TextView statusBadge(Context ctx, String text, int color) {
+    public static TextView statusBadge(Context ctx, String text, int color) {
         TextView badge = new TextView(ctx);
         badge.setText(text);
         applyBadgeStyle(badge, color);
@@ -50,7 +52,7 @@ final class Theme {
     }
 
     /** A round, subtly-tinted icon-only button (like a Material IconButton). */
-    static ImageButton iconButton(Context ctx, int drawableRes, int tintColor, String contentDescription) {
+    public static ImageButton iconButton(Context ctx, int drawableRes, int tintColor, String contentDescription) {
         ImageButton btn = new ImageButton(ctx);
         btn.setImageResource(drawableRes);
         btn.setColorFilter(tintColor);
@@ -65,8 +67,42 @@ final class Theme {
         return btn;
     }
 
+    /** A small square preview of a just-captured photo, downsampled so a handful of these on screen at once doesn't risk running out of memory on a low-RAM device. */
+    public static android.widget.ImageView photoPreview(Context ctx, java.io.File file, int sizeDp) {
+        ImageView iv = new ImageView(ctx);
+        float density = ctx.getResources().getDisplayMetrics().density;
+        int sizePx = (int) (sizeDp * density);
+        iv.setLayoutParams(new LinearLayout.LayoutParams(sizePx, sizePx));
+        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        try {
+            android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+            opts.inSampleSize = 4;
+            android.graphics.Bitmap bitmap = android.graphics.BitmapFactory.decodeFile(file.getAbsolutePath(), opts);
+            if (bitmap != null) iv.setImageBitmap(bitmap);
+        } catch (Exception ignored) {
+        }
+        return iv;
+    }
+
+    /** The app's main action button: a solid `color` fill, white bold text, rounded corners. */
+    public static android.widget.Button filledButton(Context ctx, String text, int color) {
+        android.widget.Button button = new android.widget.Button(ctx);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setTextColor(0xffffffff);
+        button.setTextSize(15);
+        button.setTypeface(button.getTypeface(), Typeface.BOLD);
+        float density = ctx.getResources().getDisplayMetrics().density;
+        button.setPadding((int) (18 * density), (int) (14 * density), (int) (18 * density), (int) (14 * density));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(color);
+        background.setCornerRadius(8 * density);
+        button.setBackground(background);
+        return button;
+    }
+
     /** A pill-shaped, tinted icon+text button (e.g. an icon next to the word "Refresh"). */
-    static LinearLayout iconTextButton(Context ctx, int drawableRes, String text, int color) {
+    public static LinearLayout iconTextButton(Context ctx, int drawableRes, String text, int color) {
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -99,7 +135,7 @@ final class Theme {
 
     /** An icon used as a tab item (no text). Size and tint are set by the caller / styleTabIcon. */
     /** A bottom-tab item: icon above a short text label, both tinted together by styleTabItem(). */
-    static LinearLayout tabIconWithLabel(Context ctx, int drawableRes, String label) {
+    public static LinearLayout tabIconWithLabel(Context ctx, int drawableRes, String label) {
         float density = ctx.getResources().getDisplayMetrics().density;
         LinearLayout item = new LinearLayout(ctx);
         item.setOrientation(LinearLayout.VERTICAL);
@@ -128,7 +164,7 @@ final class Theme {
 
     /** A left-nav drawer row: icon + label side by side, full width. Child order (icon, then text) matches
      * tabIconWithLabel() so styleTabItem() can tint either shape. */
-    static LinearLayout drawerMenuItem(Context ctx, int drawableRes, String label) {
+    public static LinearLayout drawerMenuItem(Context ctx, int drawableRes, String label) {
         float density = ctx.getResources().getDisplayMetrics().density;
         LinearLayout item = new LinearLayout(ctx);
         item.setOrientation(LinearLayout.HORIZONTAL);
@@ -154,7 +190,7 @@ final class Theme {
     }
 
     /** Tints a tabIconWithLabel()/drawerMenuItem() item's icon + text and toggles its active pill background. */
-    static void styleTabItem(LinearLayout item, boolean active) {
+    public static void styleTabItem(LinearLayout item, boolean active) {
         ImageView icon = (ImageView) item.getChildAt(0);
         TextView text = (TextView) item.getChildAt(1);
         int color = active ? PRIMARY : NEUTRAL;
@@ -173,7 +209,7 @@ final class Theme {
     }
 
     /** A circular avatar placeholder ImageView; content set later (e.g. from a downloaded bitmap) is clipped to a circle. */
-    static ImageView circularAvatar(Context ctx, int sizeDp) {
+    public static ImageView circularAvatar(Context ctx, int sizeDp) {
         ImageView avatar = new ImageView(ctx);
         avatar.setScaleType(ImageView.ScaleType.CENTER_CROP);
         GradientDrawable placeholder = new GradientDrawable();
@@ -191,7 +227,7 @@ final class Theme {
     }
 
     /** Applies the same rounded-border look used on the login screen's inputs (field_background.xml). */
-    static void styleInput(EditText field) {
+    public static void styleInput(EditText field) {
         field.setBackgroundResource(R.drawable.field_background);
         float density = field.getContext().getResources().getDisplayMetrics().density;
         field.setPadding((int) (14 * density), (int) (12 * density), (int) (14 * density), (int) (12 * density));
@@ -200,7 +236,7 @@ final class Theme {
     }
 
     /** A white rounded-corner card background (16dp radius, faint outline standing in for elevation). */
-    static GradientDrawable cardBackground(Context ctx) {
+    public static GradientDrawable cardBackground(Context ctx) {
         float density = ctx.getResources().getDisplayMetrics().density;
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(SURFACE);
@@ -210,7 +246,7 @@ final class Theme {
     }
 
     /** A dialog title row: a small colored accent dot beside bold text, in place of a plain default title (used with Popup.Builder.setCustomTitle). */
-    static android.view.View dialogTitle(Context ctx, String text, int accentColor) {
+    public static android.view.View dialogTitle(Context ctx, String text, int accentColor) {
         float density = ctx.getResources().getDisplayMetrics().density;
         LinearLayout row = new LinearLayout(ctx);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -237,7 +273,7 @@ final class Theme {
     }
 
     /** Colours an already-shown Popup's main button (blue by default; e.g. red for a warning). The card itself is styled by Popup. */
-    static void styleDialog(Popup dialog, int positiveColor) {
+    public static void styleDialog(Popup dialog, int positiveColor) {
         if (positiveColor != PRIMARY) dialog.setPositiveColor(positiveColor);
     }
 }

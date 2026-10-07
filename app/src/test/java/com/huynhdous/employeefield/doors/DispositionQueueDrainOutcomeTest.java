@@ -1,5 +1,6 @@
-package com.huynhdous.employeefield;
+package com.huynhdous.employeefield.doors;
 
+import com.huynhdous.employeefield.core.net.Api;
 import static org.junit.Assert.assertEquals;
 
 import org.junit.Test;
@@ -31,7 +32,7 @@ public class DispositionQueueDrainOutcomeTest {
     @Test
     public void serverRejectsSubmission422_isMarkedFailed() {
         assertEquals(DispositionQueue.DrainOutcome.SKIP_MARK_FAILED,
-                DispositionQueue.decideDrainOutcome(new EmployeeApi.ApiError(422, "Invalid photo"), true));
+                DispositionQueue.decideDrainOutcome(new Api.ApiError(422, "Invalid photo"), true));
     }
 
     @Test
@@ -39,13 +40,13 @@ public class DispositionQueueDrainOutcomeTest {
         // Bad data (e.g. a corrupt photo) will never succeed under any employee -- an unconfirmed
         // owner doesn't make it any more retryable.
         assertEquals(DispositionQueue.DrainOutcome.SKIP_MARK_FAILED,
-                DispositionQueue.decideDrainOutcome(new EmployeeApi.ApiError(422, "Invalid photo"), false));
+                DispositionQueue.decideDrainOutcome(new Api.ApiError(422, "Invalid photo"), false));
     }
 
     @Test
     public void dispositionAlreadyClosed404_isMarkedFailedForKnownOwner() {
         assertEquals(DispositionQueue.DrainOutcome.SKIP_MARK_FAILED,
-                DispositionQueue.decideDrainOutcome(new EmployeeApi.ApiError(404, "Active disposition not found"), true));
+                DispositionQueue.decideDrainOutcome(new Api.ApiError(404, "Active disposition not found"), true));
     }
 
     @Test
@@ -54,31 +55,31 @@ public class DispositionQueueDrainOutcomeTest {
         // THIS employee's -- not that it belongs to no one. It must stay available for a different
         // employee signing into this device later, not get locked out by this one wrong guess.
         assertEquals(DispositionQueue.DrainOutcome.SKIP_LEAVE_PENDING,
-                DispositionQueue.decideDrainOutcome(new EmployeeApi.ApiError(404, "Active disposition not found"), false));
+                DispositionQueue.decideDrainOutcome(new Api.ApiError(404, "Active disposition not found"), false));
     }
 
     @Test
     public void authExpired401_stopsTheDrain() {
         assertEquals(DispositionQueue.DrainOutcome.STOP,
-                DispositionQueue.decideDrainOutcome(new EmployeeApi.ApiError(401, "Session expired"), true));
+                DispositionQueue.decideDrainOutcome(new Api.ApiError(401, "Session expired"), true));
     }
 
     @Test
     public void forbidden403_stopsTheDrain() {
         assertEquals(DispositionQueue.DrainOutcome.STOP,
-                DispositionQueue.decideDrainOutcome(new EmployeeApi.ApiError(403, "Forbidden"), true));
+                DispositionQueue.decideDrainOutcome(new Api.ApiError(403, "Forbidden"), true));
     }
 
     @Test
     public void rateLimited429_stopsTheDrain() {
         assertEquals(DispositionQueue.DrainOutcome.STOP,
-                DispositionQueue.decideDrainOutcome(new EmployeeApi.ApiError(429, "Too many requests"), true));
+                DispositionQueue.decideDrainOutcome(new Api.ApiError(429, "Too many requests"), true));
     }
 
     @Test
     public void serverError500_stopsTheDrain() {
         assertEquals(DispositionQueue.DrainOutcome.STOP,
-                DispositionQueue.decideDrainOutcome(new EmployeeApi.ApiError(500, "Unable to save disposition."), true));
+                DispositionQueue.decideDrainOutcome(new Api.ApiError(500, "Unable to save disposition."), true));
     }
 
     @Test

@@ -1,4 +1,6 @@
-package com.huynhdous.employeefield;
+package com.huynhdous.employeefield.core.ui;
+
+import com.huynhdous.employeefield.R;
 
 import android.app.Activity;
 import android.app.Dialog;
@@ -21,17 +23,17 @@ import java.util.List;
 
 /** A modern centred card for "what do you want to do with this?" choices -- rounded corners, one big
  * tappable row per action (icon + label), and a Cancel pill -- instead of the plain list in a stock AlertDialog. */
-final class ActionSheet {
+public final class ActionSheet {
     private ActionSheet() {
     }
 
-    static final class Action {
-        final String label;
-        final int iconRes;
-        final boolean destructive;
-        final Runnable run;
+    public static final class Action {
+        public final String label;
+        public final int iconRes;
+        public final boolean destructive;
+        public final Runnable run;
 
-        Action(String label, int iconRes, boolean destructive, Runnable run) {
+        public Action(String label, int iconRes, boolean destructive, Runnable run) {
             this.label = label;
             this.iconRes = iconRes;
             this.destructive = destructive;
@@ -39,7 +41,7 @@ final class ActionSheet {
         }
     }
 
-    static void show(Activity activity, String title, String subtitle, List<Action> actions) {
+    public static void show(Activity activity, String title, String subtitle, List<Action> actions) {
         float density = activity.getResources().getDisplayMetrics().density;
         Dialog dialog = new Dialog(activity);
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);

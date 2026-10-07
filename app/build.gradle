@@ -1,4 +1,19 @@
 plugins { id 'com.android.application' }
+
+// ---- App settings: app-config.properties (+ optional app-config.local.properties override) -> BuildConfig constants ----
+// Edit the .properties file, not this script or the Java code. See com.huynhdous.employeefield.core.config.Config.
+def appConfig = new Properties()
+['app-config.properties', 'app-config.local.properties'].each { name ->
+    def file = file(name)
+    if (file.exists()) file.withReader('UTF-8') { appConfig.load(it) }
+}
+def cfg = { String key ->
+    def value = appConfig.getProperty(key)
+    if (value == null || value.trim().isEmpty()) throw new GradleException("app/app-config.properties is missing a value for '${key}'.")
+    return value.trim()
+}
+def cfgString = { String key -> '"' + cfg(key).replace('\\', '\\\\').replace('"', '\\"') + '"' }
+
 android {
     namespace 'com.huynhdous.employeefield'
     compileSdk 35
@@ -8,7 +23,22 @@ android {
         targetSdk 35
         versionCode 3
         versionName '0.3.0'
-        buildConfigField "int", "EMPLOYEE_POLLING_PER_MIN", "${project.findProperty('EMPLOYEE_POLLING_PER_MIN') ?: 1}"
+        buildConfigField "String", "API_BASE_URL", cfgString('api.base_url')
+        buildConfigField "String", "MAP_TILE_URL", cfgString('map.tile_url')
+        buildConfigField "String", "MAP_ATTRIBUTION", cfgString('map.attribution')
+        buildConfigField "String", "GEOCODE_REVERSE_URL", cfgString('geocode.reverse_url')
+        buildConfigField "String", "STREETVIEW_WEB_URL", cfgString('streetview.web_url')
+        buildConfigField "int", "TRACKING_POSITIONS_PER_MINUTE", cfg('tracking.positions_per_minute')
+        buildConfigField "int", "PHOTO_MAX_EDGE_PX", cfg('photo.max_edge_px')
+        buildConfigField "int", "PHOTO_JPEG_QUALITY", cfg('photo.jpeg_quality')
+        buildConfigField "double", "DOOR_PHOTO_PROXIMITY_METERS", cfg('door.photo_proximity_meters')
+        buildConfigField "int", "CHECKIN_MAX_STORE_PHOTOS", cfg('checkin.max_store_photos')
+        buildConfigField "int", "CHECKIN_LOCATION_TIMEOUT_SECONDS", cfg('checkin.location_timeout_seconds')
+        buildConfigField "int", "WORK_DAILY_TARGET_MINUTES", cfg('work.daily_target_minutes')
+        buildConfigField "int", "WORK_WEEKLY_TARGET_MINUTES", cfg('work.weekly_target_minutes')
+        buildConfigField "int", "MEAL_CHECK_INTERVAL_MINUTES", cfg('meal.check_interval_minutes')
+        buildConfigField "double", "MEAL_WINDOW_START_HOURS", cfg('meal.window_start_hours')
+        buildConfigField "double", "MEAL_WINDOW_END_HOURS", cfg('meal.window_end_hours')
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17

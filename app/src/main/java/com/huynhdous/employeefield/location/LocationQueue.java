@@ -1,4 +1,4 @@
-package com.huynhdous.employeefield;
+package com.huynhdous.employeefield.location;
 
 import android.content.Context;
 import android.content.ContentValues;

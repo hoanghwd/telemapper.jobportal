@@ -31,15 +31,7 @@
             </FrameLayout>
             <Button android:id="@+id/help" style="?android:attr/borderlessButtonStyle" android:layout_width="match_parent" android:layout_height="52dp"
                 android:layout_marginTop="8dp" android:text="@string/help" android:textAllCaps="false" android:textSize="14sp" android:textColor="#003FB1"/>
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp"
-                android:orientation="vertical" android:padding="18dp" android:background="@drawable/info_background">
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/tracking_title"
-                    android:textColor="#1D438E" android:textSize="14sp" android:fontFamily="sans-serif-medium"/>
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="@string/tracking_message"
-                    android:textColor="#4C6186" android:textSize="13sp" android:lineSpacingExtra="3dp"/>
-            </LinearLayout>
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="22dp"
-                android:layout_marginBottom="12dp" android:gravity="center" android:text="@string/prototype" android:textSize="11sp" android:textColor="#63728A"/>
+            <Space android:layout_width="match_parent" android:layout_height="24dp"/>
         </LinearLayout>
     </LinearLayout>
 </ScrollView>

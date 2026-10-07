@@ -1,5 +1,10 @@
-package com.huynhdous.employeefield;
+package com.huynhdous.employeefield.location;
 
+import com.huynhdous.employeefield.main;
+import com.huynhdous.employeefield.R;
+import com.huynhdous.employeefield.doors.DispositionQueue;
+import com.huynhdous.employeefield.core.config.Config;
+import com.huynhdous.employeefield.core.net.Api;
 import android.Manifest;
 import android.app.*;
 import android.content.*;
@@ -19,7 +24,7 @@ public final class TrackingService extends Service implements LocationListener {
     private static final String CHANNEL = "employee_gps", STOP = "com.huynhdous.employeefield.STOP_TRACKING";
     private static final int NOTIFICATION = 30;
     // Same knob as the server's EMPLOYEE_POLLING_PER_MIN env var, so both sides can be tuned together.
-    static final long POLL_INTERVAL_MS = 60_000L / Math.max(1, BuildConfig.EMPLOYEE_POLLING_PER_MIN);
+    public static final long POLL_INTERVAL_MS = 60_000L / Math.max(1, Config.TRACKING_POSITIONS_PER_MINUTE);
     private static final long FIX_DEDUPE_NANOS = Math.max(1_000_000_000L, (POLL_INTERVAL_MS - 1000) * 1_000_000L);
     private static final long FIX_MAX_AGE_NANOS = POLL_INTERVAL_MS * 2 * 1_000_000L;
     // Reminder-only meal-period nudge (no blocking) — mirrors the server's compliance check
@@ -29,8 +34,8 @@ public final class TrackingService extends Service implements LocationListener {
     // together if the office ever changes these.
     private static final String MEAL_CHANNEL = "meal_period_reminder";
     private static final int MEAL_NOTIFICATION = 31;
-    private static final long MEAL_CHECK_INTERVAL_MS = 15 * 60_000L;
-    private static final double MEAL_WINDOW_START_HOURS = 3.0, MEAL_WINDOW_END_HOURS = 5.0;
+    private static final long MEAL_CHECK_INTERVAL_MS = Config.MEAL_CHECK_INTERVAL_MS;
+    private static final double MEAL_WINDOW_START_HOURS = Config.MEAL_WINDOW_START_HOURS, MEAL_WINDOW_END_HOURS = Config.MEAL_WINDOW_END_HOURS;
     private LocationManager manager;
     private LocationQueue queue;
     private DispositionQueue dispositionQueue;
@@ -57,7 +62,7 @@ public final class TrackingService extends Service implements LocationListener {
     }
 
     private Notification notification(String text) {
-        PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, LoginActivity.class), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, main.class), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         PendingIntent stop = PendingIntent.getService(this, 1, new Intent(this, TrackingService.class).setAction(STOP), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         return new Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_brand).setContentTitle("Work location tracking · " + (POLL_INTERVAL_MS / 1000) + " seconds").setContentText(text).setOngoing(true).setOnlyAlertOnce(true).setContentIntent(open).addAction(new Notification.Action.Builder(null, "Stop and sign out", stop).build()).build();
     }
@@ -97,7 +102,7 @@ public final class TrackingService extends Service implements LocationListener {
                     }
                 }
                 try {
-                    EmployeeApi.post("logout", new JSONObject().put("token", old));
+                    Api.post("logout", new JSONObject().put("token", old));
                 } catch (Exception ignored) {
                 }
             }).start();
@@ -210,10 +215,10 @@ public final class TrackingService extends Service implements LocationListener {
                     update("No fresh GPS fix. Check Location is enabled.");
                 return;
             }
-            JSONObject response = EmployeeApi.post("locations", new JSONObject().put("token", token).put("points", points));
+            JSONObject response = Api.post("locations", new JSONObject().put("token", token).put("points", points));
             queue.acknowledge(employee, response.getJSONArray("accepted"));
             update("Positions saved · " + queue.count(employee) + " waiting to upload");
-        } catch (EmployeeApi.ApiError e) {
+        } catch (Api.ApiError e) {
             if (e.code == 401 || e.code == 403) {
                 update("Session ended. Sign in again to track.");
                 new Handler(Looper.getMainLooper()).post(this::stopSelf);
@@ -240,7 +245,7 @@ public final class TrackingService extends Service implements LocationListener {
         }
         if (mealUrgentReminded) return; // Nothing further to remind about once the strongest nudge has fired today.
         try {
-            JSONObject response = EmployeeApi.post("timeclock/day", new JSONObject().put("token", token).put("work_date", today));
+            JSONObject response = Api.post("timeclock/day", new JSONObject().put("token", token).put("work_date", today));
             JSONArray events = response.getJSONArray("events");
             Long clockInMs = null;
             boolean clockedOut = false, mealStarted = false;
@@ -267,7 +272,7 @@ public final class TrackingService extends Service implements LocationListener {
     }
 
     private void postMealReminder(String title, String text) {
-        PendingIntent open = PendingIntent.getActivity(this, 2, new Intent(this, LoginActivity.class), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent open = PendingIntent.getActivity(this, 2, new Intent(this, main.class), PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification n = new Notification.Builder(this, MEAL_CHANNEL).setSmallIcon(R.drawable.ic_brand).setContentTitle(title).setContentText(text).setAutoCancel(true).setContentIntent(open).build();
         getSystemService(NotificationManager.class).notify(MEAL_NOTIFICATION, n);
     }

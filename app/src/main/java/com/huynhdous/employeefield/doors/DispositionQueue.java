@@ -1,5 +1,6 @@
-package com.huynhdous.employeefield;
+package com.huynhdous.employeefield.doors;
 
+import com.huynhdous.employeefield.core.net.Api;
 import android.content.Context;
 import android.content.ContentValues;
 import android.database.Cursor;
@@ -13,8 +14,8 @@ import java.util.List;
  * but for the disposition-finish photo+outcome instead of a GPS point. The photo file itself lives
  * in the durable finish-queue directory (not the camera capture's cache-dir temp file, which the OS
  * can reclaim at any time), so a submission survives even if it sits queued for hours. */
-final class DispositionQueue extends SQLiteOpenHelper {
-    // LoginActivity (a user-triggered drain on the Doors tab) and TrackingService (a periodic
+public final class DispositionQueue extends SQLiteOpenHelper {
+    // DoorsTab (a user-triggered drain) and TrackingService (a periodic
     // background drain) each hold their own DispositionQueue instance but run in the same process --
     // without this, both can read the same pending rows and submit the same disposition twice at
     // once. A JVM-wide lock, not an instance lock, is required since they're different objects.
@@ -39,7 +40,7 @@ final class DispositionQueue extends SQLiteOpenHelper {
          * serviced) at an address that already has one on file -- required by the server for those
          * statuses when a duplicate is on record (see D2dDisposition::finishForEmployeeToken()).
          * Null for an ordinary finish; only ever set when retrying a submission the server rejected
-         * for exactly this reason (see LoginActivity.showEditFailedDialog()). */
+         * for exactly this reason (see FailedFinishes.showEditFailedDialog()). */
         final String duplicateOverrideReason;
         /** When the rep actually closed the door (phone clock). Sent with the upload so the server records that moment, not the
          * moment a queued finish finally got through -- a door finished at 6:24 PM but uploaded at 9:50 PM is still a 6:24 PM door.
@@ -68,7 +69,7 @@ final class DispositionQueue extends SQLiteOpenHelper {
         }
     }
 
-    DispositionQueue(Context context) {
+    public DispositionQueue(Context context) {
         super(context, "employee_disposition_finishes.db", null, 6);
     }
 
@@ -241,7 +242,7 @@ final class DispositionQueue extends SQLiteOpenHelper {
     }
 
     /** Promotes a pre-migration unassigned record (employee_id 0) to a confirmed owner once the
-     * server has verified it's genuinely theirs (see LoginActivity's verifyThenShowUnassignedDialog)
+     * server has verified it's genuinely theirs (see FailedFinishes.verifyThenShowUnassignedDialog)
      * -- from then on it's an ordinary record for that employee, not something every signed-in user
      * on this device can see and act on. Scoped by queued_ms like remove()/markFailed(), and requires
      * the row to still be employee_id=0 so this can't reassign an already-claimed record. */
@@ -267,7 +268,7 @@ final class DispositionQueue extends SQLiteOpenHelper {
 
     /** Still-retryable submissions waiting on a connection -- used for "N doors pending upload"
      * messaging. Excludes permanently-failed rows, which need a human, not a retry. */
-    int pendingCountForEmployee(long employeeId) {
+    public int pendingCountForEmployee(long employeeId) {
         try (Cursor c = getReadableDatabase().rawQuery("SELECT COUNT(*) FROM finishes WHERE (employee_id=? OR employee_id=0) AND failed=0", new String[]{String.valueOf(employeeId)})) {
             c.moveToFirst();
             return c.getInt(0);
@@ -305,8 +306,8 @@ final class DispositionQueue extends SQLiteOpenHelper {
             // whose record this is.
             return DrainOutcome.SKIP_MARK_FAILED;
         }
-        if (e instanceof EmployeeApi.ApiError) {
-            int code = ((EmployeeApi.ApiError) e).code;
+        if (e instanceof Api.ApiError) {
+            int code = ((Api.ApiError) e).code;
             if (code == 404 && !employeeIdKnown) return DrainOutcome.SKIP_LEAVE_PENDING;
             // 422/404: the server has permanently rejected this exact submission (bad data, or the
             // door was already closed/removed another way) -- retrying the same bytes will never
@@ -336,7 +337,7 @@ final class DispositionQueue extends SQLiteOpenHelper {
      * process-wide so this can never run concurrently with another drain() call (from either this or a
      * different DispositionQueue instance) and double-submit the same record. Safe to call from any
      * thread; never touches UI. */
-    void drain(String token, long employeeId) {
+    public void drain(String token, long employeeId) {
         synchronized (DRAIN_LOCK) {
             for (Finish f : pendingForEmployee(employeeId)) {
                 try {
@@ -344,7 +345,7 @@ final class DispositionQueue extends SQLiteOpenHelper {
                     remove(f.dispositionId, f.queuedMs);
                     new java.io.File(f.photoPath).delete();
                 } catch (Exception e) {
-                    if (e instanceof EmployeeApi.ApiError && ((EmployeeApi.ApiError) e).code == 404) {
+                    if (e instanceof Api.ApiError && ((Api.ApiError) e).code == 404) {
                         EmployeeApi.FinishStatus check = EmployeeApi.checkFinishStatus(token, f.dispositionId);
                         if (check == null) continue; // couldn't verify right now -- leave pending, try again next drain
                         if (check.found && check.ended) {

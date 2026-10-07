@@ -1,4 +1,6 @@
-package com.huynhdous.employeefield;
+package com.huynhdous.employeefield.core.ui;
+
+import com.huynhdous.employeefield.R;
 
 import android.app.Dialog;
 import android.content.Context;
@@ -26,7 +28,7 @@ import android.widget.TextView;
  * getButton(BUTTON_*) -- so a screen only changes the class name, not how it works. As with AlertDialog, a button
  * dismisses the pop-up after its listener runs, unless the caller replaces the button's click listener.
  */
-final class Popup extends Dialog {
+public final class Popup extends Dialog {
     private final Button[] buttons = new Button[3]; // index 0 positive, 1 neutral, 2 negative
 
     private Popup(Context context) {
@@ -34,12 +36,12 @@ final class Popup extends Dialog {
     }
 
     /** BUTTON_POSITIVE / BUTTON_NEUTRAL / BUTTON_NEGATIVE, as in AlertDialog. */
-    Button getButton(int which) {
+    public Button getButton(int which) {
         return which == BUTTON_POSITIVE ? buttons[0] : which == BUTTON_NEUTRAL ? buttons[1] : which == BUTTON_NEGATIVE ? buttons[2] : null;
     }
 
     /** Fills the main (positive) button with this colour -- e.g. red for a warning -- keeping its label readable. */
-    void setPositiveColor(int color) {
+    public void setPositiveColor(int color) {
         Button positive = buttons[0];
         if (positive == null) return;
         float density = getContext().getResources().getDisplayMetrics().density;
@@ -51,7 +53,7 @@ final class Popup extends Dialog {
         positive.setTextColor(luminance > 0.6 ? 0xff2a1200 : Color.WHITE);
     }
 
-    static final class Builder {
+    public static final class Builder {
         private final Context context;
         private CharSequence title;
         private View customTitle;
@@ -63,36 +65,36 @@ final class Popup extends Dialog {
         private final OnClickListener[] listeners = new OnClickListener[3];
         private boolean cancelable = true;
 
-        Builder(Context context) {
+        public Builder(Context context) {
             this.context = context;
         }
 
-        Builder setTitle(CharSequence title) { this.title = title; return this; }
-        Builder setTitle(int resId) { return setTitle(context.getText(resId)); }
-        Builder setCustomTitle(View customTitle) { this.customTitle = customTitle; return this; }
-        Builder setMessage(CharSequence message) { this.message = message; return this; }
-        Builder setMessage(int resId) { return setMessage(context.getText(resId)); }
-        Builder setView(View view) { this.view = view; return this; }
-        Builder setCancelable(boolean cancelable) { this.cancelable = cancelable; return this; }
+        public Builder setTitle(CharSequence title) { this.title = title; return this; }
+        public Builder setTitle(int resId) { return setTitle(context.getText(resId)); }
+        public Builder setCustomTitle(View customTitle) { this.customTitle = customTitle; return this; }
+        public Builder setMessage(CharSequence message) { this.message = message; return this; }
+        public Builder setMessage(int resId) { return setMessage(context.getText(resId)); }
+        public Builder setView(View view) { this.view = view; return this; }
+        public Builder setCancelable(boolean cancelable) { this.cancelable = cancelable; return this; }
 
-        Builder setItems(CharSequence[] items, OnClickListener listener) {
+        public Builder setItems(CharSequence[] items, OnClickListener listener) {
             this.items = items;
             this.itemsListener = listener;
             return this;
         }
 
-        Builder setPositiveButton(CharSequence label, OnClickListener listener) { labels[0] = label; listeners[0] = listener; return this; }
-        Builder setPositiveButton(int resId, OnClickListener listener) { return setPositiveButton(context.getText(resId), listener); }
-        Builder setNeutralButton(CharSequence label, OnClickListener listener) { labels[1] = label; listeners[1] = listener; return this; }
-        Builder setNegativeButton(CharSequence label, OnClickListener listener) { labels[2] = label; listeners[2] = listener; return this; }
+        public Builder setPositiveButton(CharSequence label, OnClickListener listener) { labels[0] = label; listeners[0] = listener; return this; }
+        public Builder setPositiveButton(int resId, OnClickListener listener) { return setPositiveButton(context.getText(resId), listener); }
+        public Builder setNeutralButton(CharSequence label, OnClickListener listener) { labels[1] = label; listeners[1] = listener; return this; }
+        public Builder setNegativeButton(CharSequence label, OnClickListener listener) { labels[2] = label; listeners[2] = listener; return this; }
 
-        Popup show() {
+        public Popup show() {
             Popup popup = create();
             popup.show();
             return popup;
         }
 
-        Popup create() {
+        public Popup create() {
             final float density = context.getResources().getDisplayMetrics().density;
             final Popup popup = new Popup(context);
             popup.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -151,7 +153,8 @@ final class Popup extends Dialog {
             for (CharSequence label : labels) if (label != null) count++;
             if (count > 0) {
                 LinearLayout row = new LinearLayout(context);
-                boolean sideBySide = count == 2 && labels[0] != null && labels[2] != null;
+                // Two short labels sit side by side; a longer label (e.g. "Continue Anyway") gets the whole width, so it never has to wrap.
+                boolean sideBySide = count == 2 && labels[0] != null && labels[2] != null && labels[0].length() <= 12 && labels[2].length() <= 12;
                 row.setOrientation(sideBySide ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
                 row.setPadding((int) (22 * density), (int) (14 * density), (int) (22 * density), (int) (18 * density));
                 int[] order = sideBySide ? new int[]{2, 0} : new int[]{0, 1, 2};
@@ -161,8 +164,8 @@ final class Popup extends Dialog {
                     Button b = pill(popup, labels[idx], idx, listeners[idx], density);
                     popup.buttons[idx] = b;
                     LinearLayout.LayoutParams lp = sideBySide
-                            ? new LinearLayout.LayoutParams(0, (int) (50 * density), 1f)
-                            : new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) (50 * density));
+                            ? new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+                            : new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                     if (!first) {
                         if (sideBySide) lp.leftMargin = (int) (10 * density);
                         else lp.topMargin = (int) (8 * density);
@@ -198,9 +201,9 @@ final class Popup extends Dialog {
             b.setTextSize(15);
             b.setTypeface(b.getTypeface(), Typeface.BOLD);
             b.setStateListAnimator(null);
-            b.setMinHeight(0);
-            b.setMinimumHeight(0);
-            b.setPadding((int) (12 * density), 0, (int) (12 * density), 0);
+            b.setMinHeight((int) (50 * density));
+            b.setMinimumHeight((int) (50 * density));
+            b.setPadding((int) (12 * density), (int) (10 * density), (int) (12 * density), (int) (10 * density));
             GradientDrawable bg = new GradientDrawable();
             bg.setCornerRadius(14 * density);
             if (idx == 0) {

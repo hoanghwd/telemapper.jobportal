@@ -3,9 +3,10 @@
     const status = document.getElementById('status');
     try {
         const map = L.map('map', {preferCanvas: true});
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        // The tile server and credit line come from app/app-config.properties (injected by the app as APP_CONFIG), not from here.
+        L.tileLayer(APP_CONFIG.tileUrl, {
             maxZoom: 19,
-            attribution: '© OpenStreetMap'
+            attribution: APP_CONFIG.attribution
         }).addTo(map);
         const route = L.featureGroup().addTo(map), area = L.featureGroup().addTo(map);
         const text = s => {

@@ -3,7 +3,8 @@
 const status=document.getElementById('status');
 try {
  const map=L.map('map',{preferCanvas:true});
- L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+ // The tile server and credit line come from app/app-config.properties (injected by the app as APP_CONFIG), not from here.
+ L.tileLayer(APP_CONFIG.tileUrl,{maxZoom:19,attribution:APP_CONFIG.attribution}).addTo(map);
  const route=L.featureGroup().addTo(map);
  const text=s=>{const e=document.createElement('span');e.textContent=s;return e.innerHTML;};
  const canStreetView=window.AndroidBridge&&typeof window.AndroidBridge.openStreetView==='function';
