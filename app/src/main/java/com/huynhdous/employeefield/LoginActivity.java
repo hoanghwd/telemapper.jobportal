@@ -5517,8 +5517,40 @@ public final class LoginActivity extends Activity {
         }
     }
 
+    /** Signing out throws the login away on the server, and a finished door still waiting in the phone's queue can only be
+     * uploaded with a valid login -- so it used to sit unsent (the door showing "in progress" on the office's screen for hours)
+     * until that person signed in again. Send anything waiting first; if it can't go through right now (no connection), say
+     * so and let the rep choose, instead of quietly stranding it. */
     private void logout() {
         final String old = token;
+        final long currentEmployeeId = employeeId;
+        if (dispositionQueue == null || dispositionQueue.pendingCountForEmployee(currentEmployeeId) == 0) {
+            finishLogout(old);
+            return;
+        }
+        busy = true;
+        Toast.makeText(this, "Sending your finished doors before signing out…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            dispositionQueue.drain(old, currentEmployeeId);
+            runOnUiThread(() -> {
+                busy = false;
+                int left = dispositionQueue.pendingCountForEmployee(currentEmployeeId);
+                if (left == 0) {
+                    finishLogout(old);
+                    return;
+                }
+                new Popup.Builder(this)
+                        .setCustomTitle(Theme.dialogTitle(this, left + (left == 1 ? " door hasn't" : " doors haven't") + " uploaded yet", Theme.WARNING))
+                        .setMessage("There's no connection right now. Your finished " + (left == 1 ? "door is" : "doors are") + " saved on this phone, but "
+                                + "the office won't see " + (left == 1 ? "it" : "them") + " until you sign in again and the phone is online.\n\nStay signed in and try again once you have a signal.")
+                        .setPositiveButton("Stay signed in", null)
+                        .setNegativeButton("Sign out anyway", (d, w) -> finishLogout(old))
+                        .show();
+            });
+        }).start();
+    }
+
+    private void finishLogout(String old) {
         stopService(new android.content.Intent(this, TrackingService.class));
         TrackingService.activeToken = "";
         TrackingService.status = "Tracking is off.";

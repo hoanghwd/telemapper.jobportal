@@ -78,11 +78,24 @@ public final class TrackingService extends Service implements LocationListener {
         }
         if (STOP.equals(intent.getAction())) {
             String old = activeToken;
+            long who = employee > 0 ? employee : activeEmployee;
+            Context appContext = getApplicationContext();
             activeToken = "";
             status = "Tracking stopped. Sign in again to resume.";
             stopping = true;
             stopSelf();
             new Thread(() -> {
+                // A finished door still waiting in the queue can only upload with this login, and signing out deletes it -- so send
+                // what is waiting first (own queue handle: this service closes its own one as it stops).
+                if (who > 0 && !old.isEmpty()) {
+                    DispositionQueue waiting = new DispositionQueue(appContext);
+                    try {
+                        waiting.drain(old, who);
+                    } catch (Exception ignored) {
+                    } finally {
+                        waiting.close();
+                    }
+                }
                 try {
                     EmployeeApi.post("logout", new JSONObject().put("token", old));
                 } catch (Exception ignored) {

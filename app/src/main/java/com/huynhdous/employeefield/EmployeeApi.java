@@ -93,6 +93,8 @@ final class EmployeeApi {
         if (f.callbackDate != null) fields.put("callback_date", f.callbackDate);
         if (f.photoDistanceReason != null) fields.put("photo_distance_reason", f.photoDistanceReason);
         if (f.duplicateOverrideReason != null) fields.put("duplicate_override_reason", f.duplicateOverrideReason);
+        // The moment the rep closed the door, so a finish that sat in the queue still lands at its real time.
+        if (f.finishedMs > 0) fields.put("finished_utc", java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(java.time.ZoneOffset.UTC).format(java.time.Instant.ofEpochMilli(f.finishedMs)));
         return postMultipart("telemapper/disposition/finish", fields, java.util.Collections.singletonList(new FilePart("photo", "door.jpg", "image/jpeg", photoBytes)));
     }
 

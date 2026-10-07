@@ -41,12 +41,17 @@ final class DispositionQueue extends SQLiteOpenHelper {
          * Null for an ordinary finish; only ever set when retrying a submission the server rejected
          * for exactly this reason (see LoginActivity.showEditFailedDialog()). */
         final String duplicateOverrideReason;
+        /** When the rep actually closed the door (phone clock). Sent with the upload so the server records that moment, not the
+         * moment a queued finish finally got through -- a door finished at 6:24 PM but uploaded at 9:50 PM is still a 6:24 PM door.
+         * Stays the same when a correction replaces the queued row. 0 only for a Finish not queued yet. */
+        final long finishedMs;
 
         Finish(long employeeId, int dispositionId, String status, String note, Double latitude, Double longitude, String callbackDate, String photoPath, String photoDistanceReason, String duplicateOverrideReason) {
-            this(employeeId, dispositionId, status, note, latitude, longitude, callbackDate, photoPath, photoDistanceReason, 0, null, null, duplicateOverrideReason);
+            this(employeeId, dispositionId, status, note, latitude, longitude, callbackDate, photoPath, photoDistanceReason, 0, null, null, duplicateOverrideReason, 0);
         }
 
-        private Finish(long employeeId, int dispositionId, String status, String note, Double latitude, Double longitude, String callbackDate, String photoPath, String photoDistanceReason, long queuedMs, String failureReason, String submissionId, String duplicateOverrideReason) {
+        private Finish(long employeeId, int dispositionId, String status, String note, Double latitude, Double longitude, String callbackDate, String photoPath, String photoDistanceReason, long queuedMs, String failureReason, String submissionId, String duplicateOverrideReason, long finishedMs) {
+            this.finishedMs = finishedMs;
             this.employeeId = employeeId;
             this.dispositionId = dispositionId;
             this.status = status;
@@ -64,12 +69,12 @@ final class DispositionQueue extends SQLiteOpenHelper {
     }
 
     DispositionQueue(Context context) {
-        super(context, "employee_disposition_finishes.db", null, 5);
+        super(context, "employee_disposition_finishes.db", null, 6);
     }
 
     @Override
     public void onCreate(SQLiteDatabase db) {
-        db.execSQL("CREATE TABLE finishes (disposition_id INTEGER PRIMARY KEY,employee_id INTEGER NOT NULL,status TEXT NOT NULL,note TEXT NOT NULL,latitude REAL,longitude REAL,callback_date TEXT,photo_path TEXT NOT NULL,photo_distance_reason TEXT,failed INTEGER NOT NULL DEFAULT 0,failure_reason TEXT,submission_id TEXT NOT NULL,duplicate_override_reason TEXT,queued_ms INTEGER NOT NULL)");
+        db.execSQL("CREATE TABLE finishes (disposition_id INTEGER PRIMARY KEY,employee_id INTEGER NOT NULL,status TEXT NOT NULL,note TEXT NOT NULL,latitude REAL,longitude REAL,callback_date TEXT,photo_path TEXT NOT NULL,photo_distance_reason TEXT,failed INTEGER NOT NULL DEFAULT 0,failure_reason TEXT,submission_id TEXT NOT NULL,duplicate_override_reason TEXT,queued_ms INTEGER NOT NULL,finished_ms INTEGER NOT NULL DEFAULT 0)");
     }
 
     @Override
@@ -95,6 +100,8 @@ final class DispositionQueue extends SQLiteOpenHelper {
             db.execSQL("ALTER TABLE finishes ADD COLUMN submission_id TEXT NOT NULL DEFAULT ''");
         }
         if (oldVersion < 5) db.execSQL("ALTER TABLE finishes ADD COLUMN duplicate_override_reason TEXT");
+        // 0 for a row queued before this column existed: readRow() then falls back to that row's own queued_ms.
+        if (oldVersion < 6) db.execSQL("ALTER TABLE finishes ADD COLUMN finished_ms INTEGER NOT NULL DEFAULT 0");
     }
 
     void add(Finish f) {
@@ -103,8 +110,14 @@ final class DispositionQueue extends SQLiteOpenHelper {
         // superseded, it's now orphaned on disk and nothing will ever upload (or delete) it, since
         // drain() only ever sees the row that's actually in the table -- clean it up here instead.
         String oldPhotoPath = null;
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT photo_path FROM finishes WHERE disposition_id=?", new String[]{String.valueOf(f.dispositionId)})) {
-            if (c.moveToFirst()) oldPhotoPath = c.getString(0);
+        // A correction keeps the original finish moment; only a brand-new finish is stamped "now".
+        long finishedMs = System.currentTimeMillis();
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT photo_path, finished_ms, queued_ms FROM finishes WHERE disposition_id=?", new String[]{String.valueOf(f.dispositionId)})) {
+            if (c.moveToFirst()) {
+                oldPhotoPath = c.getString(0);
+                long was = c.getLong(1) > 0 ? c.getLong(1) : c.getLong(2);
+                if (was > 0) finishedMs = was;
+            }
         }
 
         ContentValues row = new ContentValues();
@@ -125,6 +138,7 @@ final class DispositionQueue extends SQLiteOpenHelper {
         row.put("submission_id", java.util.UUID.randomUUID().toString());
         row.put("duplicate_override_reason", f.duplicateOverrideReason);
         row.put("queued_ms", System.currentTimeMillis());
+        row.put("finished_ms", finishedMs);
         // CONFLICT_REPLACE on disposition_id also doubles as "retry": re-queuing the same door
         // (e.g. after a rep corrects something) clears any earlier failed/failure_reason state.
         getWritableDatabase().insertWithOnConflict("finishes", null, row, SQLiteDatabase.CONFLICT_REPLACE);
@@ -138,11 +152,12 @@ final class DispositionQueue extends SQLiteOpenHelper {
                 c.isNull(4) ? null : c.getDouble(4), c.isNull(5) ? null : c.getDouble(5),
                 c.isNull(6) ? null : c.getString(6), c.getString(7),
                 c.isNull(8) ? null : c.getString(8), c.getLong(9), c.isNull(10) ? null : c.getString(10), c.getString(11),
-                c.isNull(12) ? null : c.getString(12)
+                c.isNull(12) ? null : c.getString(12),
+                c.getLong(13) > 0 ? c.getLong(13) : c.getLong(9)
         );
     }
 
-    private static final String ROW_COLUMNS = "employee_id,disposition_id,status,note,latitude,longitude,callback_date,photo_path,photo_distance_reason,queued_ms,failure_reason,submission_id,duplicate_override_reason";
+    private static final String ROW_COLUMNS = "employee_id,disposition_id,status,note,latitude,longitude,callback_date,photo_path,photo_distance_reason,queued_ms,failure_reason,submission_id,duplicate_override_reason,finished_ms";
 
     /** This employee's still-retryable submissions, plus any pre-migration row with no known owner
      * (employee_id=0 -- see onUpgrade()) so it gets an honest, server-verified shot at resolving
