@@ -40,6 +40,17 @@ public final class ProfileTab extends TabModule {
     private boolean uploading;
 
     @Override
+    public void saveState(android.os.Bundle out) {
+        if (pendingCameraUri != null) out.putString("profile_camera_uri", pendingCameraUri.toString());
+    }
+
+    @Override
+    public void restoreState(android.os.Bundle state) {
+        String uri = state.getString("profile_camera_uri");
+        if (uri != null) pendingCameraUri = android.net.Uri.parse(uri);
+    }
+
+    @Override
     public String title() {
         return "Profile";
     }
@@ -151,8 +162,9 @@ public final class ProfileTab extends TabModule {
         EditText field = new EditText(context());
         field.setHint(hint);
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        field.setTransformationMethod(PasswordTransformationMethod.getInstance());
         field.setSingleLine(true);
+        field.setTransformationMethod(PasswordTransformationMethod.getInstance());
+        field.setSaveEnabled(false);
         Theme.styleInput(field);
         return field;
     }
@@ -222,13 +234,19 @@ public final class ProfileTab extends TabModule {
 
     private void uploadAvatarFromUri(android.net.Uri uri) {
         if (uploading) return;
+        final com.huynhdous.employeefield.core.session.SessionWork.Lease work = host().beginUpload();
+        if (work == null) {
+            new Popup.Builder(context()).setTitle("Please wait").setMessage("A request is still finishing. Please try again shortly.")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
         uploading = true;
-        final String token = host().token();
+        final String token = work.token;
         new Thread(() -> {
             String error = null;
             HttpsURLConnection conn = null;
             try {
-                byte[] imageBytes = Api.readAllBytes(context().getContentResolver().openInputStream(uri));
+                byte[] imageBytes = com.huynhdous.employeefield.core.media.Images.avatarBytes(context(), uri);
                 if (imageBytes.length > 2 * 1024 * 1024) throw new IOException("TOO_LARGE");
                 String boundary = "----EmployeeFieldBoundary" + System.currentTimeMillis();
                 conn = (HttpsURLConnection) new URL(Config.API_BASE_URL + "avatar/upload").openConnection();
@@ -251,10 +269,12 @@ public final class ProfileTab extends TabModule {
                 error = "TOO_LARGE".equals(e.getMessage()) ? "That photo is too large. Choose a smaller image." : "Unable to upload photo. Check your connection and try again.";
             } finally {
                 if (conn != null) conn.disconnect();
+                work.close();
             }
             String problem = error;
             context().runOnUiThread(() -> {
                 uploading = false;
+                if (!host().isCurrent(work)) return;
                 if (problem != null) {
                     new Popup.Builder(context()).setTitle("Upload photo").setMessage(problem).setPositiveButton("OK", null).show();
                 } else {

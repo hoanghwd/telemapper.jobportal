@@ -179,12 +179,18 @@ final class PhotoFix {
 
     private void upload() {
         if (pendingFile == null || uploading) return;
+        final com.huynhdous.employeefield.core.session.SessionWork.Lease work = host.beginUpload();
+        if (work == null) {
+            new Popup.Builder(context()).setTitle("Please wait").setMessage("A request is still finishing. Please try again shortly.")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
         uploading = true;
         final File file = pendingFile;
         final long arrivalId = this.arrivalId;
         final String which = this.which;
         final int position = this.position;
-        final String token = host.token();
+        final String token = work.token;
         message.accept("Saving photo…");
         new Thread(() -> {
             String error = null;
@@ -217,10 +223,12 @@ final class PhotoFix {
                 error = "Unable to save the photo. Check your connection and try again.";
             } finally {
                 if (conn != null) conn.disconnect();
+                work.close();
             }
             String problem = error;
             context().runOnUiThread(() -> {
                 uploading = false;
+                if (!host.isCurrent(work)) return;
                 message.accept("");
                 if (problem != null) {
                     // Keep the picture so a dropped connection doesn't mean taking it again.

@@ -275,6 +275,13 @@ public final class DoorsTab extends TabModule {
         doorsAddressText = null;
         doorsFinishButton = null;
         doorsStartHereButton = null;
+        if (doorsMapView != null) {
+            doorsMapView.stopLoading();
+            doorsMapView.removeJavascriptInterface("AndroidBridge");
+            if (doorsMapView.getParent() instanceof android.view.ViewGroup)
+                ((android.view.ViewGroup) doorsMapView.getParent()).removeView(doorsMapView);
+            doorsMapView.destroy();
+        }
         doorsMapView = null;
         doorsMapStatus = null;
         doorsReportContainer = null;
@@ -541,6 +548,7 @@ public final class DoorsTab extends TabModule {
     /** Keep map drags and pinch gestures inside the WebView, not its parent ScrollView. */
     private void protectMapGestures(android.webkit.WebView map) {
         map.setOnTouchListener((view, event) -> {
+            if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP) view.performClick();
             android.view.ViewParent parent = view.getParent();
             if (parent != null) {
                 int action = event.getActionMasked();

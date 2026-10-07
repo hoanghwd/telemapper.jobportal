@@ -89,3 +89,12 @@ Emulator locations are flagged as simulated and are not joined into a verified t
 6. Sign out: tracking stops and no new positions arrive.
 
 Real-device screen-lock and battery tests remain required before an employee rollout.
+
+
+## Validation and recovery
+
+Run `gradlew.bat :app:assembleDebug :app:assembleRelease :app:testDebugUnitTest :app:lintDebug` with JVM 21.
+The release APK is unsigned until release signing is configured. Regression tests exercise camera-state recovery,
+session mutation ownership and bounded input reads. Real-phone screen-lock, camera and permission checks remain required.
+Sign-out waits for a photo upload to finish; the notification's Stop action stops GPS immediately and delays token
+revocation until the upload finishes. Failed check-ins retain photos; retry checks assignment status first.

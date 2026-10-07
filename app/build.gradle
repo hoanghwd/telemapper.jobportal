@@ -14,6 +14,35 @@ def cfg = { String key ->
 }
 def cfgString = { String key -> '"' + cfg(key).replace('\\', '\\\\').replace('"', '\\"') + '"' }
 
+// Reject invalid local overrides before generating code or starting tracking.
+def range = { String key, lower, upper ->
+    def number
+    try { number = Double.parseDouble(cfg(key)) }
+    catch (NumberFormatException e) { throw new GradleException("Invalid number for '${key}'.", e) }
+    if (!Double.isFinite(number) || number < lower || number > upper)
+        throw new GradleException("'${key}' must be between ${lower} and ${upper}.")
+}
+range('tracking.positions_per_minute', 1, 60)
+range('photo.max_edge_px', 256, 4096)
+range('photo.jpeg_quality', 1, 100)
+range('door.photo_proximity_meters', 1, 10000)
+range('checkin.max_store_photos', 1, 10)
+range('checkin.location_timeout_seconds', 1, 120)
+range('work.daily_target_minutes', 1, 1440)
+range('work.weekly_target_minutes', 1, 10080)
+range('meal.check_interval_minutes', 1, 1440)
+range('meal.window_start_hours', 0, 24)
+range('meal.window_end_hours', 0, 24)
+if (Double.parseDouble(cfg('meal.window_start_hours')) >= Double.parseDouble(cfg('meal.window_end_hours')))
+    throw new GradleException('Meal reminder start must precede its end.')
+['api.base_url', 'map.tile_url', 'geocode.reverse_url', 'streetview.web_url'].each { key ->
+    def value = cfg(key).replace('{z}', '0').replace('{x}', '0').replace('{y}', '0').replace('%s', '0')
+    def uri = new URI(value)
+    if (uri.scheme != 'https' || !uri.host || uri.userInfo != null)
+        throw new GradleException("'${key}' must be an HTTPS URL without embedded credentials.")
+}
+if (!cfg('api.base_url').endsWith('/')) throw new GradleException('api.base_url must end with a slash.')
+
 android {
     namespace 'com.huynhdous.employeefield'
     compileSdk 35
@@ -44,6 +73,7 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    testOptions { unitTests.includeAndroidResources = true }
     buildFeatures {
         buildConfig true
     }
@@ -51,7 +81,7 @@ android {
 dependencies {
     // Only for FileProvider (secure file:// -> content:// URIs for camera capture); no other AndroidX libs used.
     implementation 'androidx.core:core:1.13.1'
-    // Plain JVM unit tests (app/src/test) -- no device/emulator, no Robolectric; only for pure logic
-    // with no Android framework dependency, like DispositionQueue's drain-outcome decision.
+    // JVM tests cover pure logic and Android lifecycle recovery with Robolectric.
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.16.1'
 }

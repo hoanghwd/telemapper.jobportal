@@ -298,33 +298,70 @@ public final class DayClock {
             holders[i] = new java.time.LocalTime[]{originals[i]};
             addTimeField(form, TIME_FIELD_LABELS[i], holders[i], density);
         }
-        EditText reason = new EditText(context());
-        reason.setHint("Reason for the change");
-        reason.setMinLines(2);
-        Theme.styleInput(reason);
-        LinearLayout.LayoutParams reasonParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        reasonParams.topMargin = (int) (12 * density);
-        form.addView(reason, reasonParams);
-
-        new Popup.Builder(context())
+        Popup editDialog = new Popup.Builder(context())
                 .setTitle(isToday ? "Edit today's times" : "Edit this day's times")
                 .setView(scroll)
-                .setPositiveButton("Save", (d, w) -> {
-                    String note = reason.getText().toString().trim();
-                    java.util.List<Integer> changed = new java.util.ArrayList<>();
-                    for (int i = 0; i < 6; i++) {
-                        java.time.LocalTime cur = holders[i][0];
-                        if (cur != null && !cur.equals(originals[i])) changed.add(i);
-                    }
-                    if (changed.isEmpty()) return;
-                    if (note.isEmpty()) {
-                        new Popup.Builder(context()).setTitle("Reason required").setMessage("Enter a reason for the change.").setPositiveButton("OK", null).show();
-                        return;
-                    }
-                    submitTimeEditQueue(holders, originalEventIds, changed, 0, note);
-                })
+                .setPositiveButton("Continue", null)
                 .setNegativeButton("Cancel", null)
                 .show();
+        editDialog.getButton(Popup.BUTTON_POSITIVE).setOnClickListener(v -> {
+            java.util.List<Integer> changed = new java.util.ArrayList<>();
+            for (int i = 0; i < 6; i++) {
+                java.time.LocalTime cur = holders[i][0];
+                if (cur != null && !cur.equals(originals[i])) changed.add(i);
+            }
+            if (changed.isEmpty()) {
+                editDialog.dismiss();
+                return;
+            }
+            showTimeEditReasonDialog(editDialog, holders, originalEventIds, changed);
+        });
+    }
+
+    private void showTimeEditReasonDialog(Popup editDialog, java.time.LocalTime[][] holders,
+                                          int[] originalEventIds, java.util.List<Integer> changed) {
+        EditText reason = new EditText(context());
+        reason.setHint("Reason for the change (required)");
+        reason.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        reason.setMinLines(2);
+        Theme.styleInput(reason);
+        LinearLayout form = new LinearLayout(context());
+        form.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (16 * context().getResources().getDisplayMetrics().density);
+        form.setPadding(pad, pad, pad, pad);
+        form.addView(reason, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        Popup reasonDialog = new Popup.Builder(context())
+                .setTitle("Reason for changing times")
+                .setMessage("Enter a reason before saving your time changes.")
+                .setView(form)
+                .setPositiveButton("Save", null)
+                .setNegativeButton("Back", null)
+                .show();
+        Button save = reasonDialog.getButton(Popup.BUTTON_POSITIVE);
+        save.setEnabled(false);
+        reason.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                save.setEnabled(!s.toString().trim().isEmpty());
+            }
+            public void afterTextChanged(android.text.Editable s) { }
+        });
+        save.setOnClickListener(v -> {
+            String note = reason.getText().toString().trim();
+            if (note.isEmpty()) {
+                reason.setError("Enter a reason for the change.");
+                return;
+            }
+            save.setEnabled(false);
+            reasonDialog.dismiss();
+            editDialog.dismiss();
+            submitTimeEditQueue(holders, originalEventIds, changed, 0, note);
+        });
+        reason.requestFocus();
+        if (reasonDialog.getWindow() != null) reasonDialog.getWindow().setSoftInputMode(
+                android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                        | android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
     }
 
     private void addTimeField(LinearLayout form, String label, java.time.LocalTime[] holder, float density) {

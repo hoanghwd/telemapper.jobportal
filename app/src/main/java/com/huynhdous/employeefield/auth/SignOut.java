@@ -37,23 +37,46 @@ public final class SignOut {
 
     /** The employee asked to sign out (ignored while a server call is running). */
     public void ifIdle() {
-        if (!requester.isBusy()) begin();
+        if (requester.isBusy()) {
+            Toast.makeText(activity, "Please wait for your upload or request to finish before signing out.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        begin();
     }
 
     public void begin() {
+        if (requester.isBusy()) return;
         final String old = session.token;
         final long employeeId = session.employeeId;
         if (queue.pendingCountForEmployee(employeeId) == 0) {
             finish(old);
             return;
         }
+        final com.huynhdous.employeefield.core.session.SessionWork.Lease work =
+                com.huynhdous.employeefield.core.session.SessionWork.begin(old, employeeId);
+        if (work == null) return;
         requester.setBusy(true);
         Toast.makeText(activity, "Sending your finished doors before signing out…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
-            queue.drain(old, employeeId);
+            int remaining;
+            try (DispositionQueue workerQueue = new DispositionQueue(activity.getApplicationContext())) {
+                workerQueue.drain(old, employeeId);
+                remaining = workerQueue.pendingCountForEmployee(employeeId);
+            } catch (Exception e) {
+                remaining = -1;
+            } finally {
+                work.close();
+            }
+            final int left = remaining;
             activity.runOnUiThread(() -> {
                 requester.setBusy(false);
-                int left = queue.pendingCountForEmployee(employeeId);
+                if (activity.isFinishing() || activity.isDestroyed() || !old.equals(session.token)) return;
+                if (left < 0) {
+                    new Popup.Builder(activity).setTitle("Unable to finish signing out")
+                            .setMessage("Your saved doors could not be checked. Please try again.")
+                            .setPositiveButton("OK", null).show();
+                    return;
+                }
                 if (left == 0) {
                     finish(old);
                     return;
@@ -69,7 +92,12 @@ public final class SignOut {
         }).start();
     }
 
+    public void close() {
+        queue.close();
+    }
+
     private void finish(String oldToken) {
+        com.huynhdous.employeefield.core.session.SessionWork.end(oldToken);
         tracking.stop("Tracking is off.", true);
         showSignIn.run();
         new Thread(() -> {

@@ -142,7 +142,8 @@ public final class DispositionQueue extends SQLiteOpenHelper {
         row.put("finished_ms", finishedMs);
         // CONFLICT_REPLACE on disposition_id also doubles as "retry": re-queuing the same door
         // (e.g. after a rep corrects something) clears any earlier failed/failure_reason state.
-        getWritableDatabase().insertWithOnConflict("finishes", null, row, SQLiteDatabase.CONFLICT_REPLACE);
+        if (getWritableDatabase().insertWithOnConflict("finishes", null, row, SQLiteDatabase.CONFLICT_REPLACE) == -1)
+            throw new android.database.SQLException("Unable to save finished door");
 
         if (oldPhotoPath != null && !oldPhotoPath.equals(f.photoPath)) new java.io.File(oldPhotoPath).delete();
     }

@@ -74,7 +74,10 @@ public final class TrackingStarter {
     /** Stop tracking and show {@code statusText} in the log (no screen shows it any more); {@code forgetSignIn} also clears the token the service keeps. */
     public void stop(String statusText, boolean forgetSignIn) {
         activity.stopService(new Intent(activity, TrackingService.class));
-        if (forgetSignIn) TrackingService.activeToken = "";
+        if (forgetSignIn) {
+            com.huynhdous.employeefield.core.session.SessionWork.end(session.token);
+            TrackingService.activeToken = "";
+        }
         TrackingService.status = statusText;
     }
 

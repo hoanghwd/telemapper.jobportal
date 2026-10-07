@@ -33,7 +33,7 @@ final class GreetingCard {
         headerRow.setOrientation(LinearLayout.HORIZONTAL);
         headerRow.setGravity(Gravity.CENTER_VERTICAL);
         ImageButton menuButton = Theme.iconButton(activity, R.drawable.ic_menu_hamburger, Theme.NEUTRAL, "Menu");
-        int buttonSize = (int) (40 * density);
+        int buttonSize = (int) (48 * density);
         LinearLayout.LayoutParams menuButtonParams = new LinearLayout.LayoutParams(buttonSize, buttonSize);
         menuButtonParams.rightMargin = (int) (10 * density);
         headerRow.addView(menuButton, menuButtonParams);

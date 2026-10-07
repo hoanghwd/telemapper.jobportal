@@ -172,6 +172,12 @@ final class RoutePreview {
         locateButton.setElevation(6 * density);
         locateButton.setOnClickListener(v -> TripMap.showWhereAmI(activity, webView));
 
+        dialog.setOnDismissListener(d -> {
+            webView.stopLoading();
+            webView.removeJavascriptInterface("AndroidBridge");
+            mapStack.removeView(webView);
+            webView.destroy();
+        });
         dialog.setContentView(container);
         android.view.Window window = dialog.getWindow();
         if (window != null) {

@@ -108,11 +108,14 @@ public final class Theme {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setClickable(true);
         row.setFocusable(true);
+        row.setContentDescription(text);
+        row.setMinimumHeight((int) (48 * ctx.getResources().getDisplayMetrics().density));
         float density = ctx.getResources().getDisplayMetrics().density;
         row.setPadding((int) (10 * density), (int) (8 * density), (int) (14 * density), (int) (8 * density));
 
         ImageView icon = new ImageView(ctx);
         icon.setImageResource(drawableRes);
+        icon.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         icon.setColorFilter(color);
         int iconSize = (int) (18 * density);
         row.addView(icon, new LinearLayout.LayoutParams(iconSize, iconSize));
@@ -146,6 +149,7 @@ public final class Theme {
 
         ImageView icon = new ImageView(ctx);
         icon.setImageResource(drawableRes);
+        icon.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         icon.setContentDescription(label);
         icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams((int) (22 * density), (int) (22 * density));
@@ -175,6 +179,7 @@ public final class Theme {
 
         ImageView icon = new ImageView(ctx);
         icon.setImageResource(drawableRes);
+        icon.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         icon.setContentDescription(label);
         icon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         item.addView(icon, new LinearLayout.LayoutParams((int) (22 * density), (int) (22 * density)));

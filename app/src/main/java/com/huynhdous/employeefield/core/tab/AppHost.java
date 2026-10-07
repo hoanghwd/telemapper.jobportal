@@ -18,6 +18,13 @@ public interface AppHost {
 
     long employeeId();
 
+    /** Reserve a mutation until its worker completes; shared with sign-out and recreated activities. */
+    com.huynhdous.employeefield.core.session.SessionWork.Lease beginUpload();
+
+    default boolean isCurrent(com.huynhdous.employeefield.core.session.SessionWork.Lease work) {
+        return !activity().isFinishing() && !activity().isDestroyed() && work.matches(token(), employeeId());
+    }
+
     /** "D2D" or "S2S" (door-to-door or in-store), as set by the office; may be null. */
     String programCode();
 

@@ -28,6 +28,19 @@ public final class Images {
         }
     }
 
+    public static byte[] avatarBytes(android.content.Context context, android.net.Uri uri) throws IOException {
+        File temporary = File.createTempFile("avatar_upload_", ".img", context.getCacheDir());
+        try {
+            try (java.io.OutputStream out = new java.io.FileOutputStream(temporary)) {
+                com.huynhdous.employeefield.core.net.LimitedStreams.copy(
+                        context.getContentResolver().openInputStream(uri), out, 32 * 1024 * 1024);
+            }
+            return compressedJpeg(temporary);
+        } catch (OutOfMemoryError e) {
+            throw new IOException("TOO_LARGE", e);
+        } finally { temporary.delete(); }
+    }
+
     public static byte[] compressedJpeg(File file) throws IOException {
         String path = file.getAbsolutePath();
         android.graphics.BitmapFactory.Options bounds = new android.graphics.BitmapFactory.Options();

@@ -85,11 +85,14 @@ public final class TrackingService extends Service implements LocationListener {
             String old = activeToken;
             long who = employee > 0 ? employee : activeEmployee;
             Context appContext = getApplicationContext();
+            com.huynhdous.employeefield.core.session.SessionWork.end(old);
             activeToken = "";
             status = "Tracking stopped. Sign in again to resume.";
             stopping = true;
             stopSelf();
             new Thread(() -> {
+                try { com.huynhdous.employeefield.core.session.SessionWork.awaitIdle(old); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
                 // A finished door still waiting in the queue can only upload with this login, and signing out deletes it -- so send
                 // what is waiting first (own queue handle: this service closes its own one as it stops).
                 if (who > 0 && !old.isEmpty()) {

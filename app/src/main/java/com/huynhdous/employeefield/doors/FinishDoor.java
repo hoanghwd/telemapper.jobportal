@@ -195,44 +195,51 @@ final class FinishDoor {
      * queue is drained again on the next periodic tracking cycle if this immediate attempt fails. */
     private void submitFinishDoor(String status, String note, Double lat, Double lon, String callbackDate, String photoDistanceReason) {
         if (tab.activeDispositionId == null || pendingDoorsPhotoFile == null) return;
-        final int dispositionId = tab.activeDispositionId;
-        final File capturedPhoto = pendingDoorsPhotoFile;
-        File durableDir = new File(activity.getFilesDir(), "door_finishes");
-        if (!durableDir.exists()) durableDir.mkdirs();
-        File durablePhoto = new File(durableDir, "door_" + dispositionId + "_" + System.currentTimeMillis() + ".jpg");
-        try {
-            byte[] bytes = Api.readAllBytes(new FileInputStream(capturedPhoto));
-            // Checked here, before queueing, not just left to the server: a too-large photo would
-            // otherwise queue successfully and then fail every future drain attempt forever, blocking
-            // every other queued door behind it since drain() stops at the first failure it hits.
-            if (bytes.length > 8 * 1024 * 1024) {
-                new Popup.Builder(activity).setTitle("Finish door").setMessage("That photo is too large. Please retake it.").setPositiveButton("OK", null).show();
-                return;
-            }
-            try (OutputStream out = new FileOutputStream(durablePhoto)) {
-                out.write(bytes);
-            }
-        } catch (IOException e) {
-            new Popup.Builder(activity).setTitle("Finish door").setMessage("Unable to save the photo. Try again.").setPositiveButton("OK", null).show();
+        final com.huynhdous.employeefield.core.session.SessionWork.Lease work = host.beginUpload();
+        if (work == null) {
+            tab.say("Please wait for your current request to finish, then try again.");
             return;
         }
-        capturedPhoto.delete();
-        tab.queue.add(new DispositionQueue.Finish(host.employeeId(), dispositionId, status, note, lat, lon, callbackDate, durablePhoto.getAbsolutePath(), photoDistanceReason, null));
-        tab.renderIdle();
-        tab.loadDoorsMap();
-        tab.messageText.setText("Door saved — uploading now…");
-
-        final String currentToken = host.token();
-        final long currentEmployeeId = host.employeeId();
+        final int dispositionId = tab.activeDispositionId;
+        final File capturedPhoto = pendingDoorsPhotoFile;
+        tab.say("Saving your door…");
         new Thread(() -> {
-            tab.queue.drain(currentToken, currentEmployeeId);
-            int remaining = tab.queue.pendingCountForEmployee(currentEmployeeId);
+            DispositionQueue storage = new DispositionQueue(activity.getApplicationContext());
+            File durablePhoto = null;
+            String error = null;
+            try {
+                File durableDir = new File(activity.getFilesDir(), "door_finishes");
+                if (!durableDir.isDirectory() && !durableDir.mkdirs()) throw new IOException("Unable to create photo directory");
+                durablePhoto = File.createTempFile("door_" + dispositionId + "_", ".jpg", durableDir);
+                byte[] bytes = com.huynhdous.employeefield.core.media.Images.photoBytesForUpload(capturedPhoto);
+                try (OutputStream out = new FileOutputStream(durablePhoto)) { out.write(bytes); }
+                storage.add(new DispositionQueue.Finish(work.employeeId, dispositionId, status, note, lat, lon,
+                        callbackDate, durablePhoto.getAbsolutePath(), photoDistanceReason, null));
+                capturedPhoto.delete();
+            } catch (Exception e) {
+                if (durablePhoto != null) durablePhoto.delete();
+                error = "TOO_LARGE".equals(e.getMessage()) ? "That photo is too large. Please retake it."
+                        : "Unable to save your door. Your captured photo is kept; please try again.";
+            } finally {
+                storage.close();
+                work.close();
+            }
+            final String problem = error;
             activity.runOnUiThread(() -> {
-                if (activity.isFinishing() || activity.isDestroyed() || tab.messageText == null || tab.activeDispositionId != null) return;
-                tab.messageText.setText(remaining == 0
-                        ? "Tap your position on the map below, closest to the house, to start a door — or use \"Start a New Door Here\" if none is close enough."
-                        : remaining + " door" + (remaining == 1 ? "" : "s") + " saved — will upload when you have a signal.");
+                if (!host.isCurrent(work) || tab.messageText == null) return;
+                if (problem != null) {
+                    new Popup.Builder(activity).setTitle("Finish door").setMessage(problem).setPositiveButton("OK", null).show();
+                    return;
+                }
+                if (java.util.Objects.equals(tab.activeDispositionId, dispositionId)) tab.renderIdle();
+                tab.say("Door saved — uploading now…");
+                tab.loadDoorsMap();
             });
+            if (problem == null) {
+                DispositionQueue uploads = new DispositionQueue(activity.getApplicationContext());
+                try { uploads.drain(work.token, work.employeeId); }
+                finally { uploads.close(); }
+            }
         }).start();
     }
 

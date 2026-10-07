@@ -154,6 +154,13 @@ public final class TripTab extends TabModule {
         }
         fitListener = null;
         content = null;
+        if (mapView != null) {
+            mapView.stopLoading();
+            mapView.removeJavascriptInterface("AndroidBridge");
+            if (mapView.getParent() instanceof android.view.ViewGroup)
+                ((android.view.ViewGroup) mapView.getParent()).removeView(mapView);
+            mapView.destroy();
+        }
         mapView = null;
         status = null;
         dateButton = null;

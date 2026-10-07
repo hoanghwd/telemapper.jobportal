@@ -37,6 +37,7 @@ public final class App implements AppHost, Requester.Listener {
     private final AuthFlow auth;
     private HomeScreen home;
     private int firstTab = Tabs.SCHEDULE;
+    private long restoredEmployeeId;
 
     public App(Activity activity, Bundle savedState) {
         this.activity = activity;
@@ -48,6 +49,7 @@ public final class App implements AppHost, Requester.Listener {
         gate.setListener(this::applyGate);
         if (savedState != null) {
             firstTab = savedState.getInt(STATE_TAB, Tabs.SCHEDULE);
+            restoredEmployeeId = savedState.getLong("state_employee_id", 0);
             tabs.setRestoredState(savedState);   // each tab reads its own part when it is mounted
         }
     }
@@ -56,7 +58,7 @@ public final class App implements AppHost, Requester.Listener {
     public void start() {
         String running = TrackingStarter.runningToken();
         if (running.isEmpty()) {
-            showSignIn();
+            showSignIn(false);
             return;
         }
         session.token = running;
@@ -68,13 +70,26 @@ public final class App implements AppHost, Requester.Listener {
     }
 
     private void showHome() {
+        if (restoredEmployeeId > 0 && restoredEmployeeId != session.employeeId) {
+            tabs.discardRestoredState();
+            firstTab = Tabs.SCHEDULE;
+        }
+        restoredEmployeeId = session.employeeId;
         home = new HomeScreen(activity, session, gate, tabs, this, signOut::ifIdle);
         home.show(firstTab);
         firstTab = Tabs.SCHEDULE;
     }
 
     private void showSignIn() {
-        tabs.detachAll();
+        showSignIn(true);
+    }
+
+    private void showSignIn(boolean discardRecovery) {
+        tabs.detachAll(discardRecovery);
+        if (discardRecovery) {
+            firstTab = Tabs.SCHEDULE;
+            restoredEmployeeId = 0;
+        }
         home = null;
         session.clear();
         auth.showSignIn();
@@ -87,6 +102,10 @@ public final class App implements AppHost, Requester.Listener {
 
     // ---- what Android tells the app (forwarded by main) ----
     public void resume() {
+        if (!session.token.isEmpty() && com.huynhdous.employeefield.core.session.SessionWork.hasEnded(session.token)) {
+            sessionExpired();
+            return;
+        }
         tabs.resume();
     }
 
@@ -95,8 +114,9 @@ public final class App implements AppHost, Requester.Listener {
     }
 
     public void saveState(Bundle out) {
-        out.putInt(STATE_TAB, tabs.current());
         tabs.saveState(out);
+        out.putInt(STATE_TAB, tabs.current());
+        out.putLong("state_employee_id", session.employeeId > 0 ? session.employeeId : restoredEmployeeId);
     }
 
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -115,13 +135,31 @@ public final class App implements AppHost, Requester.Listener {
     // ---- Requester.Listener ----
     @Override
     public void sessionExpired() {
-        tracking.stop("Session expired. Sign in again.", false);
+        tracking.stop("Session expired. Sign in again.", true);
         showSignIn();
     }
 
     @Override
     public void unusableAnswer() {
+        String old = session.token;
+        tracking.stop("Tracking is off. Sign in again.", true);
+        com.huynhdous.employeefield.core.session.SessionWork.end(old);
         showSignIn();
+        if (!old.isEmpty()) new Thread(() -> {
+            try { com.huynhdous.employeefield.core.net.Api.post("logout", new JSONObject().put("token", old)); }
+            catch (Exception ignored) { }
+        }).start();
+    }
+
+    public void destroy() {
+        tabs.detachAll();
+        signOut.close();
+    }
+
+    @Override
+    public com.huynhdous.employeefield.core.session.SessionWork.Lease beginUpload() {
+        if (requester.isBusy()) return null;
+        return com.huynhdous.employeefield.core.session.SessionWork.begin(session.token, session.employeeId);
     }
 
     // ---- AppHost: what the tabs may ask ----

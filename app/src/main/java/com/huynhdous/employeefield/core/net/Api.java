@@ -21,8 +21,6 @@ public final class Api {
     private Api() {
     }
 
-    
-
     /** The server answered with an error status (or success=false). {@code code} is the HTTP status. */
     public static final class ApiError extends IOException {
         public final int code;
@@ -108,12 +106,7 @@ public final class Api {
     // ---- building blocks for a screen that streams its own request (it needs the status code and a bigger response) ----
 
     public static byte[] readAllBytes(InputStream in) throws IOException {
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        byte[] buf = new byte[4096];
-        int n;
-        while ((n = in.read(buf)) != -1) bytes.write(buf, 0, n);
-        in.close();
-        return bytes.toByteArray();
+        return LimitedStreams.read(in, 8 * 1024 * 1024);
     }
 
     public static void writeMultipartField(OutputStream out, String boundary, String name, String value) throws IOException {

@@ -38,6 +38,7 @@ public final class CheckInTab extends TabModule {
     private static final int REQUEST_CAMERA_PERMISSION = 65;
     private static final int REQUEST_TAKE_SELFIE_PHOTO = 66;
     private static final int REQUEST_TAKE_STORE_PHOTO = 67;
+    private static final String STATE_LAT = "arrival_latitude", STATE_LON = "arrival_longitude";
     private static final String STATE_SELFIE_PATH = "pending_selfie_path";
     private static final String STATE_STORE_PATH = "pending_store_path";
     private static final String STATE_ARRIVAL_ASSIGNMENT = "active_arrival_assignment";
@@ -154,6 +155,10 @@ public final class CheckInTab extends TabModule {
             for (int i = 0; i < paths.length; i++) paths[i] = acceptedStorePhotos.get(i).getAbsolutePath();
             out.putStringArray(STATE_ACCEPTED_STORE_PATHS, paths);
         }
+        if (activeLat != null && activeLon != null) {
+            out.putDouble(STATE_LAT, activeLat);
+            out.putDouble(STATE_LON, activeLon);
+        }
         if (photoFix != null) photoFix.saveState(out);
     }
 
@@ -185,6 +190,10 @@ public final class CheckInTab extends TabModule {
                 File f = new File(p);
                 if (f.exists() && f.length() > 0) acceptedStorePhotos.add(f);
             }
+        }
+        if (state.containsKey(STATE_LAT) && state.containsKey(STATE_LON)) {
+            activeLat = state.getDouble(STATE_LAT);
+            activeLon = state.getDouble(STATE_LON);
         }
         if (photoFix != null) photoFix.restoreState(state);
     }
@@ -682,9 +691,56 @@ public final class CheckInTab extends TabModule {
         builder.show();
     }
 
+    private void retryAfterCheckingStatus() {
+        if (activeAssignment == null) return;
+        final JSONObject pending = activeAssignment;
+        try {
+            host().request("telemapper/arrival/assignments", new JSONObject().put("token", host().token()), null, r -> {
+                org.json.JSONArray assignments = r.getJSONArray("assignments");
+                for (int i = 0; i < assignments.length(); i++) {
+                    JSONObject a = assignments.getJSONObject(i);
+                    if (a.getInt("assignment_id") == pending.getInt("assignment_id")
+                            && a.optString("source", "worksite").equals(pending.optString("source", "worksite"))) {
+                        if (a.optBoolean("checked_in") && !a.optBoolean("checked_out")) {
+                            clearFlow();
+                            render(assignments);
+                            return;
+                        }
+                        submit();
+                        return;
+                    }
+                }
+                setMessage("The assignment has changed. Please refresh before checking in again.");
+            });
+        } catch (Exception e) { setMessage("Unable to check status. Your photos are kept."); }
+    }
+
     private void submit() {
         if (activeAssignment == null || pendingSelfieUri == null || acceptedStorePhotos.isEmpty()) return;
         if (submitting) return;
+        if (activeLat == null || activeLon == null) {
+            setMessage("Checking your location…");
+            Geo.fetchBestLocation(context(), this::showLocationTimeoutDialog, (lat, lon) -> {
+                if (activeAssignment == null || context().isDestroyed()) return;
+                try {
+                    if (Geo.metersBetween(activeAssignment.getDouble("latitude"), activeAssignment.getDouble("longitude"), lat, lon)
+                            > activeAssignment.optInt("proximity_meters", 150)) {
+                        setMessage("Move closer to the worksite and try again.");
+                        return;
+                    }
+                    activeLat = lat;
+                    activeLon = lon;
+                    submit();
+                } catch (Exception e) { setMessage("Unable to verify the worksite location. Please refresh."); }
+            });
+            return;
+        }
+        final com.huynhdous.employeefield.core.session.SessionWork.Lease work = host().beginUpload();
+        if (work == null) {
+            new Popup.Builder(context()).setTitle("Please wait").setMessage("A request is still finishing. Please try again shortly.")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
         submitting = true;
         final JSONObject assignment = activeAssignment;
         final android.net.Uri selfieUri = pendingSelfieUri;
@@ -692,7 +748,7 @@ public final class CheckInTab extends TabModule {
         final java.util.List<File> storeFiles = new java.util.ArrayList<>(acceptedStorePhotos);
         final Double lat = activeLat;
         final Double lon = activeLon;
-        final String token = host().token();
+        final String token = work.token;
         setMessage("Checking in…");
         new Thread(() -> {
             String error = null;
@@ -739,19 +795,28 @@ public final class CheckInTab extends TabModule {
                 error = "TOO_LARGE".equals(e.getMessage()) ? "That photo is too large." : "Unable to check in. Check your connection and try again.";
             } finally {
                 if (conn != null) conn.disconnect();
+                work.close();
             }
             String problem = error;
-            context().runOnUiThread(() -> {
+            context().runOnUiThread(() -> finishSubmission(work, problem));
+        }).start();
+    }
+    void finishSubmission(com.huynhdous.employeefield.core.session.SessionWork.Lease work, String problem) {
                 submitting = false;
-                clearFlow();
+                if (!host().isCurrent(work)) return;
                 setMessage("");
                 if (problem != null) {
-                    new Popup.Builder(context()).setTitle("Check in").setMessage(problem).setPositiveButton("OK", null).show();
+                    new Popup.Builder(context()).setTitle("Check-in not confirmed")
+                            .setMessage(problem + " Your photos are kept. Refresh to check whether the visit was saved before retrying.")
+                            .setPositiveButton("Refresh status", (d, w) -> load())
+                            .setNeutralButton("Try again", (d, w) -> retryAfterCheckingStatus())
+                            .setNegativeButton("Keep photos", null).show();
                 } else {
+                    clearFlow();
                     new Popup.Builder(context()).setTitle("Checked in").setMessage("You're checked in. Have a great shift!").setPositiveButton("OK", null).show();
                     load();
                 }
-            });
-        }).start();
+
     }
+
 }

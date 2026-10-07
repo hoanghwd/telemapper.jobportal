@@ -21,8 +21,8 @@ import java.nio.charset.StandardCharsets;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
- * The app's server calls from a screen: one call at a time (a second tap is ignored while one is running), a busy spinner on the button
- * that started it, the answer delivered on the UI thread, and a pop-up for any error. A refused sign-in (401/403) ends the session.
+ * Screen reads can run together; mutations are serialized with uploads across activity recreation.
+ * Answers return on the UI thread only for the current session. A refused sign-in (401/403) ends it.
  */
 public final class Requester {
     /** What happens to the app when the server says the sign-in is over, or an answer cannot be used. */
@@ -35,16 +35,30 @@ public final class Requester {
     private final Activity activity;
     private final Session session;
     private final Listener listener;
+    private final ConnectionFactory connections;
+
+    public interface ConnectionFactory {
+        HttpsURLConnection open(String action) throws IOException;
+    }
     private boolean busy;
+    private static final java.util.Set<String> READS = new java.util.HashSet<>(java.util.Arrays.asList(
+            "schedule", "trip", "timesheet/week", "timeclock/day", "telemapper/arrival/assignments",
+            "telemapper/disposition/active", "telemapper/followup/my-leads", "telemapper/program/my-program",
+            "telemapper/retail-event/my-events", "telemapper/territory/my-route"));
 
     public Requester(Activity activity, Session session, Listener listener) {
+        this(activity, session, listener, action -> (HttpsURLConnection) new URL(Config.API_BASE_URL + action).openConnection());
+    }
+
+    public Requester(Activity activity, Session session, Listener listener, ConnectionFactory connections) {
         this.activity = activity;
         this.session = session;
         this.listener = listener;
+        this.connections = connections;
     }
 
     public boolean isBusy() {
-        return busy;
+        return busy || com.huynhdous.employeefield.core.session.SessionWork.isBusy(session.token);
     }
 
     /** Lets other long jobs (sending queued doors before sign-out) block new calls the same way. */
@@ -59,9 +73,21 @@ public final class Requester {
     }
 
     public void request(String action, JSONObject body, Button button, AppHost.Result result, boolean independentRead, AppHost.ProblemHandler onProblem) {
-        if (!independentRead && busy) return;
-        if (!independentRead) busy = true;
+        final boolean parallelRead = independentRead || READS.contains(action);
+        if (!parallelRead && isBusy()) {
+            new Popup.Builder(activity).setTitle("Please wait")
+                    .setMessage("A request is still finishing. Please try again shortly.").setPositiveButton("OK", null).show();
+            return;
+        }
         final String requestToken = session.token;
+        final com.huynhdous.employeefield.core.session.SessionWork.Lease work;
+        if (!parallelRead && !requestToken.isEmpty() && session.employeeId > 0) {
+            work = com.huynhdous.employeefield.core.session.SessionWork.begin(requestToken, session.employeeId);
+            if (work == null) return;
+        } else {
+            work = null;
+        }
+        if (!parallelRead) busy = true;
         if (button != null) setButtonBusy(button, true);
         new Thread(() -> {
             JSONObject response = null;
@@ -69,7 +95,7 @@ public final class Requester {
             int code = 0;
             HttpsURLConnection conn = null;
             try {
-                conn = (HttpsURLConnection) new URL(Config.API_BASE_URL + action).openConnection();
+                conn = connections.open(action);
                 conn.setInstanceFollowRedirects(false);
                 conn.setRequestMethod("POST");
                 conn.setConnectTimeout(15000);
@@ -100,15 +126,20 @@ public final class Requester {
                         ? "That response was too large to load. Try a narrower date range."
                         : "Unable to connect. Check your internet connection and try again.";
             } finally {
-                if (conn != null) conn.disconnect();
+                try {
+                    if (conn != null) conn.disconnect();
+                } finally {
+                    if (work != null) work.close();
+                }
             }
             final JSONObject data = response;
             final String problem = error;
             final int status = code;
             activity.runOnUiThread(() -> {
-                if (!independentRead) busy = false;
+                if (!parallelRead) busy = false;
                 if (activity.isFinishing() || activity.isDestroyed()) return;
-                if (independentRead && !java.util.Objects.equals(requestToken, session.token)) return;
+                if (!java.util.Objects.equals(requestToken, session.token)
+                        || com.huynhdous.employeefield.core.session.SessionWork.hasEnded(requestToken)) return;
                 if (button != null) setButtonBusy(button, false);
                 if (problem != null) {
                     if (status == 401 || status == 403) listener.sessionExpired();
@@ -119,7 +150,13 @@ public final class Requester {
                 try {
                     result.accept(data);
                 } catch (Exception e) {
-                    listener.unusableAnswer();
+                    if ("login".equals(action) || "me".equals(action) || "change-password".equals(action)) {
+                        listener.unusableAnswer();
+                    } else {
+                        new Popup.Builder(activity).setTitle("Unable to load")
+                                .setMessage("The server response could not be used. Please refresh and try again.")
+                                .setPositiveButton("OK", null).show();
+                    }
                 }
             });
         }).start();

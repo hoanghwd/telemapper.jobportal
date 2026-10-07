@@ -74,7 +74,14 @@ public final class TabManager {
     }
 
     public void setRestoredState(Bundle state) {
-        restoredState = state;
+        restoredState = new Bundle(state);
+        current = state.getInt("current_tab", Tabs.SCHEDULE);
+        ArrayList<Bundle> savedResults = state.getParcelableArrayList("tab_early_results");
+        if (savedResults != null) for (Bundle r : savedResults) {
+            earlyResults.add(new EarlyResult(r.getInt("code"), r.getInt("result_code"), r.getParcelable("data"),
+                    r.getStringArray("permissions"), r.getIntArray("grants")));
+        }
+        restoredState.remove("tab_early_results");
     }
 
     /** Called after a tab is shown (the title bar and the schedule banner follow it). */
@@ -126,6 +133,8 @@ public final class TabManager {
     }
 
     public void select(int index) {
+        Mounted requested = mounted.get(index);
+        if (requested == null || !requested.module.isAvailableFor(host.programCode())) index = Tabs.SCHEDULE;
         current = index;
         for (Map.Entry<Integer, Mounted> e : mounted.entrySet()) {
             e.getValue().content.setVisibility(e.getKey() == index ? View.VISIBLE : View.GONE);
@@ -165,15 +174,38 @@ public final class TabManager {
     }
 
     public void saveState(Bundle out) {
+        if (restoredState != null) out.putAll(restoredState);
         for (Mounted m : mounted.values()) m.module.saveState(out);
+        ArrayList<Bundle> savedResults = new ArrayList<>();
+        for (EarlyResult r : earlyResults) {
+            Bundle saved = new Bundle();
+            saved.putInt("code", r.code);
+            saved.putInt("result_code", r.resultCode);
+            saved.putParcelable("data", r.data);
+            saved.putStringArray("permissions", r.permissions);
+            saved.putIntArray("grants", r.grants);
+            savedResults.add(saved);
+        }
+        out.putParcelableArrayList("tab_early_results", savedResults);
+    }
+
+    public void discardRestoredState() {
+        restoredState = null;
+        earlyResults.clear();
+        current = Tabs.SCHEDULE;
     }
 
     /** The home screen is going away (sign-out): every tab lets go of its views and state. */
     public void detachAll() {
+        detachAll(true);
+    }
+
+    public void detachAll(boolean discardRecovery) {
         for (Mounted m : mounted.values()) m.module.onDetach();
         mounted.clear();
         resultOwners.clear();
-        earlyResults.clear();
+        if (discardRecovery) discardRestoredState();
+        gate.clearDimmedColumns();
         homeBuilt = false;
     }
 

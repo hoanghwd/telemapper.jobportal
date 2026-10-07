@@ -48,6 +48,12 @@ public final class main extends Activity {
     }
 
     @Override
+    protected void onDestroy() {
+        app.destroy();
+        super.onDestroy();
+    }
+
+    @Override
     public void onBackPressed() {
         if (!app.onBack()) super.onBackPressed();
     }
