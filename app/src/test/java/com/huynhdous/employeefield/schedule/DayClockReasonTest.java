@@ -28,13 +28,16 @@ public class DayClockReasonTest {
     @Test public void reasonIsRequiredBeforeSavingAndBackKeepsTimeEditor() throws Exception {
         Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
         AtomicReference<JSONObject> submitted = new AtomicReference<>();
+        AtomicReference<AppHost.Result> completed = new AtomicReference<>();
         AppHost host = (AppHost) Proxy.newProxyInstance(AppHost.class.getClassLoader(), new Class[]{AppHost.class},
                 (proxy, method, args) -> {
                     if (method.getName().equals("activity")) return activity;
                     if (method.getName().equals("token")) return "test-token";
-                    if (method.getName().equals("request")) {
+                    if (method.getName().equals("request") && args[0].equals("timeclock/correct")) {
                         assertEquals("timeclock/correct", args[0]);
                         submitted.set((JSONObject) args[1]);
+                        completed.set((AppHost.Result) args[3]);
+                        ((android.widget.Button) args[2]).setEnabled(false);
                     }
                     return null;
                 });
@@ -65,11 +68,15 @@ public class DayClockReasonTest {
         reason.setText("  Missed my clock-in  ");
         assertTrue(reasonDialog.getButton(Popup.BUTTON_POSITIVE).isEnabled());
         reasonDialog.getButton(Popup.BUTTON_POSITIVE).performClick();
+        assertTrue(editor.isShowing());
+        assertTrue(reasonDialog.isShowing());
+        reasonDialog.getButton(Popup.BUTTON_POSITIVE).setEnabled(true);
+        completed.get().accept(new JSONObject().put("success", true));
         assertFalse(editor.isShowing());
         assertFalse(reasonDialog.isShowing());
         assertEquals("Missed my clock-in", submitted.get().getString("reason"));
-        assertEquals("07:18", submitted.get().getString("corrected_time"));
-        assertEquals(42, submitted.get().getInt("original_event_id"));
+        assertEquals("07:18", submitted.get().getJSONArray("corrections").getJSONObject(0).getString("corrected_time"));
+        assertEquals(42, submitted.get().getJSONArray("corrections").getJSONObject(0).getInt("original_event_id"));
     }
 
     private static EditText findReason(View view) {

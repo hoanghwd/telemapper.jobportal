@@ -45,8 +45,15 @@ public final class SessionWork {
         /** The upload failed but trying again may work (no connection, server trouble). */
         public final boolean retryable;
         public final String message;
+        /** Optional draft identity: a late result must not change a different draft. */
+        public final String reference;
 
         public Outcome(String kind, boolean success, boolean retryable, String message) {
+            this(kind, success, retryable, message, null);
+        }
+
+        public Outcome(String kind, boolean success, boolean retryable, String message, String reference) {
+            this.reference = reference;
             this.kind = kind;
             this.success = success;
             this.retryable = retryable;

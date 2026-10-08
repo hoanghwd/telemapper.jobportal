@@ -98,3 +98,9 @@ The release APK is unsigned until release signing is configured. Regression test
 session mutation ownership and bounded input reads. Real-phone screen-lock, camera and permission checks remain required.
 Sign-out waits for a photo upload to finish; the notification's Stop action stops GPS immediately and delays token
 revocation until the upload finishes. Failed check-ins retain photos; retry checks assignment status first.
+
+Ready-to-send S2S check-ins now save their photos and assignment details in employee-scoped private storage before upload.
+Reopening the app restores the waiting check-in without an activity-state Bundle; retry checks the server first.
+Starting another arrival offers to continue or explicitly discard the saved check-in. Discard and successful completion
+delete owned draft files, while rotation preserves upload inputs. Tokens are never stored with drafts.
+Real-phone camera capture, offline retry, app restart, and discard checks remain required.

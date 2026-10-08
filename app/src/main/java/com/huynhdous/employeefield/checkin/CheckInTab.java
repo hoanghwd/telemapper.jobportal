@@ -63,6 +63,8 @@ public final class CheckInTab extends TabModule {
     /** The last attempt to send the check-in failed for lack of a connection: the photos are kept and can be sent again. */
     private boolean unsent;
     private LinearLayout unsentCardView;
+    private CheckInDraftStore draftStore;
+    private String draftId;
 
     @Override
     public String title() {
@@ -88,6 +90,7 @@ public final class CheckInTab extends TabModule {
     @Override
     public void buildContent(LinearLayout content) {
         float density = density();
+        draftStore = new CheckInDraftStore(context(), host().employeeId());
         photoFix = new PhotoFix(host(), this, this::setMessage, this::load);
 
         LinearLayout headerRow = new LinearLayout(context());
@@ -116,6 +119,9 @@ public final class CheckInTab extends TabModule {
         LinearLayout.LayoutParams containerParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         containerParams.topMargin = (int) (12 * density);
         content.addView(container, containerParams);
+        Bundle draft = draftStore.load();
+        if (draft != null) restoreState(draft);
+        showUnsentCardIfAny();
     }
 
     @Override
@@ -128,7 +134,7 @@ public final class CheckInTab extends TabModule {
         container = null;
         message = null;
         photoFix = null;
-        clearFlow();
+        resetFlow(); // Rotation and sign-out preserve the employee-owned draft and upload inputs.
         activeCheckOutAssignment = null;
     }
 
@@ -136,8 +142,8 @@ public final class CheckInTab extends TabModule {
         if (message != null) message.setText(text);
     }
 
-    /** Forget the check-in in progress. */
-    private void clearFlow() {
+    /** Release references without deleting camera/upload inputs during recreation. */
+    private void resetFlow() {
         unsent = false;
         activeAssignment = null;
         activeLat = null;
@@ -148,10 +154,60 @@ public final class CheckInTab extends TabModule {
         acceptedStorePhotos.clear();
     }
 
+    /** Discard or complete a check-in only after its upload has released the files. */
+    private void clearFlow() {
+        if (submitting || com.huynhdous.employeefield.core.session.SessionWork.isBusy(host().token())) {
+            setMessage("Please wait for your upload to finish.");
+            return;
+        }
+        CheckInDraftStore storage = storage();
+        storage.clear(draftId);
+        storage.deletePhoto(pendingSelfieFile);
+        storage.deletePhoto(pendingStorePhotoFile);
+        for (File photo : acceptedStorePhotos) storage.deletePhoto(photo);
+        draftId = null;
+        resetFlow();
+        showUnsentCardIfAny();
+    }
+
+    private CheckInDraftStore storage() {
+        if (draftStore == null) draftStore = new CheckInDraftStore(context(), host().employeeId());
+        return draftStore;
+    }
+
+    /** Record the whole ready-to-send draft before starting any network operation. */
+    private void persistReadyDraft() throws IOException {
+        CheckInDraftStore storage = storage();
+        File oldSelfie = pendingSelfieFile;
+        File selfie = storage.keep(oldSelfie);
+        java.util.List<File> photos = new java.util.ArrayList<>();
+        try {
+            for (File photo : acceptedStorePhotos) photos.add(storage.keep(photo));
+            if (draftId == null) draftId = java.util.UUID.randomUUID().toString();
+            storage.save(draftId, activeAssignment, selfie, photos, activeLat, activeLon);
+        } catch (IOException e) {
+            // Failed migration must keep the original capture and remove only its new copies.
+            if (!selfie.equals(oldSelfie)) storage.deletePhoto(selfie);
+            for (int i = 0; i < photos.size(); i++) {
+                if (!photos.get(i).equals(acceptedStorePhotos.get(i))) storage.deletePhoto(photos.get(i));
+            }
+            throw e;
+        }
+        pendingSelfieFile = selfie;
+        pendingSelfieUri = fileUri(selfie);
+        if (!selfie.equals(oldSelfie)) storage.deletePhoto(oldSelfie);
+        for (int i = 0; i < photos.size(); i++) {
+            if (!photos.get(i).equals(acceptedStorePhotos.get(i))) storage.deletePhoto(acceptedStorePhotos.get(i));
+        }
+        acceptedStorePhotos.clear();
+        acceptedStorePhotos.addAll(photos);
+    }
+
     // ---------------------------------------------------------------- saved state (the camera app can close this one)
 
     @Override
     public void saveState(Bundle out) {
+        if (draftId != null) out.putString("check_in_draft_id", draftId);
         if (pendingSelfieFile != null) out.putString(STATE_SELFIE_PATH, pendingSelfieFile.getAbsolutePath());
         if (pendingStorePhotoFile != null) out.putString(STATE_STORE_PATH, pendingStorePhotoFile.getAbsolutePath());
         if (activeAssignment != null) out.putString(STATE_ARRIVAL_ASSIGNMENT, activeAssignment.toString());
@@ -170,6 +226,13 @@ public final class CheckInTab extends TabModule {
 
     @Override
     public void restoreState(Bundle state) {
+        Bundle cameraState = state;
+        if (draftStore != null) {
+            Bundle saved = draftStore.load();
+            if (saved != null) { state = new Bundle(state); state.putAll(saved); }
+        }
+        resetFlow();
+        draftId = state.getString("check_in_draft_id");
         String selfiePath = state.getString(STATE_SELFIE_PATH);
         if (selfiePath != null) {
             File f = new File(selfiePath);
@@ -202,7 +265,8 @@ public final class CheckInTab extends TabModule {
             activeLon = state.getDouble(STATE_LON);
         }
         unsent = state.getBoolean(STATE_UNSENT, false) && activeAssignment != null && !acceptedStorePhotos.isEmpty();
-        if (photoFix != null) photoFix.restoreState(state);
+        if (draftId != null && (pendingSelfieFile == null || acceptedStorePhotos.isEmpty())) resetFlow();
+        if (photoFix != null) photoFix.restoreState(cameraState);
     }
 
     private android.net.Uri fileUri(File f) {
@@ -237,7 +301,7 @@ public final class CheckInTab extends TabModule {
     @Override
     public void onPermissionResult(int requestCode, String[] permissions, int[] results) {
         if (requestCode != REQUEST_CAMERA_PERMISSION) return;
-        if (context().checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) beginSelfie();
+        if (context().checkSelfPermission(android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) locateThenCheckProximity();
         else setMessage("Camera permission is required to check in.");
     }
 
@@ -536,9 +600,19 @@ public final class CheckInTab extends TabModule {
     // ---------------------------------------------------------------- checking in
 
     private void beginArrival(JSONObject assignment) {
-        // Always called before any photo has been taken (GPS is checked first, then photos), so
-        // there's nothing accepted yet to preserve — safe to reset unconditionally.
-        acceptedStorePhotos.clear();
+        if (submitting || com.huynhdous.employeefield.core.session.SessionWork.isBusy(host().token())) {
+            setMessage("Please wait for your upload to finish.");
+            return;
+        }
+        if (activeAssignment != null) {
+            new Popup.Builder(context()).setTitle("You have a saved check-in")
+                    .setMessage("Finish or discard your check-in at " + activeAssignment.optString("site_name", "your worksite")
+                            + " before starting another one. Your photos are kept.")
+                    .setPositiveButton("Continue saved check-in", (d, w) -> continueDraft())
+                    .setNeutralButton("Discard saved check-in", (d, w) -> confirmDiscardDraft())
+                    .setNegativeButton("Keep it for later", null).show();
+            return;
+        }
         activeAssignment = assignment;
         if (context().checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
             host().requestPermissions(this, new String[]{android.Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION);
@@ -548,6 +622,20 @@ public final class CheckInTab extends TabModule {
         // right when he taps "I'm Arrived" (not a couple camera round-trips later), and avoids
         // making him take two photos only to be told afterward that he's too far away.
         locateThenCheckProximity();
+    }
+
+    private void continueDraft() {
+        if (activeAssignment == null) return;
+        if (unsent) { retryAfterCheckingStatus(); return; }
+        if (context().checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            host().requestPermissions(this, new String[]{android.Manifest.permission.CAMERA}, REQUEST_CAMERA_PERMISSION);
+        } else if (pendingStorePhotoFile != null && pendingStorePhotoFile.length() > 0) {
+            showStorePhotoReviewDialog();
+        } else if (pendingSelfieFile != null && pendingSelfieFile.length() > 0) {
+            showSelfieReviewDialog();
+        } else {
+            locateThenCheckProximity();
+        }
     }
 
     private void locateThenCheckProximity() {
@@ -581,7 +669,7 @@ public final class CheckInTab extends TabModule {
                     Popup dialog = new Popup.Builder(context())
                             .setCustomTitle(Theme.dialogTitle(context(), "Too far from the worksite", Theme.WARNING))
                             .setMessage("You're about " + Math.round(distance) + "m from " + activeAssignment.getString("site_name") + ". Move closer and try again.")
-                            .setPositiveButton("Try again", (d, which) -> beginArrival(activeAssignment))
+                            .setPositiveButton("Try again", (d, which) -> locateThenCheckProximity())
                             .setNegativeButton("Cancel", (d, which) -> {
                                 clearFlow();
                                 setMessage("");
@@ -613,14 +701,15 @@ public final class CheckInTab extends TabModule {
 
     private void beginSelfie() {
         try {
-            File photoFile = File.createTempFile("selfie_", ".jpg", context().getCacheDir());
+            File photoFile = storage().newPhoto("selfie_");
+            storage().deletePhoto(pendingSelfieFile);
             pendingSelfieFile = photoFile;
             pendingSelfieUri = fileUri(photoFile);
             android.content.Intent intent = new android.content.Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
             intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, pendingSelfieUri);
             intent.addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             new Popup.Builder(context()).setTitle("Selfie").setMessage("Take a quick selfie to confirm it's you — flip to the front camera if needed.")
-                    .setPositiveButton("Open camera", (d, w) -> host().startActivityForResult(this, intent, REQUEST_TAKE_SELFIE_PHOTO)).setNegativeButton("Cancel", null).show();
+                    .setPositiveButton("Open camera", (d, w) -> host().startActivityForResult(this, intent, REQUEST_TAKE_SELFIE_PHOTO)).setNegativeButton("Cancel", (d, w) -> clearFlow()).show();
         } catch (Exception e) {
             new Popup.Builder(context()).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try again.").setPositiveButton("OK", null).show();
         }
@@ -628,13 +717,14 @@ public final class CheckInTab extends TabModule {
 
     private void beginStorePhoto() {
         try {
-            File photoFile = File.createTempFile("store_", ".jpg", context().getCacheDir());
+            File photoFile = storage().newPhoto("store_");
+            storage().deletePhoto(pendingStorePhotoFile);
             pendingStorePhotoFile = photoFile;
             android.content.Intent intent = new android.content.Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE);
             intent.putExtra(android.provider.MediaStore.EXTRA_OUTPUT, fileUri(photoFile));
             intent.addFlags(android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             new Popup.Builder(context()).setTitle("Store photo").setMessage("Now take a photo showing you're at the store front.")
-                    .setPositiveButton("Open camera", (d, w) -> host().startActivityForResult(this, intent, REQUEST_TAKE_STORE_PHOTO)).setNegativeButton("Cancel", null).show();
+                    .setPositiveButton("Open camera", (d, w) -> host().startActivityForResult(this, intent, REQUEST_TAKE_STORE_PHOTO)).setNegativeButton("Cancel", (d, w) -> clearFlow()).show();
         } catch (Exception e) {
             new Popup.Builder(context()).setTitle("Camera unavailable").setMessage("Unable to open the camera. Try again.").setPositiveButton("OK", null).show();
         }
@@ -705,6 +795,7 @@ public final class CheckInTab extends TabModule {
         final JSONObject pending = activeAssignment;
         try {
             host().request("telemapper/arrival/assignments", new JSONObject().put("token", host().token()), null, r -> {
+                if (activeAssignment != pending) return; // The draft was discarded while the status read was in flight.
                 org.json.JSONArray assignments = r.getJSONArray("assignments");
                 for (int i = 0; i < assignments.length(); i++) {
                     JSONObject a = assignments.getJSONObject(i);
@@ -748,8 +839,18 @@ public final class CheckInTab extends TabModule {
             });
             return;
         }
+        try {
+            persistReadyDraft();
+        } catch (IOException e) {
+            new Popup.Builder(context()).setTitle("Unable to save check-in")
+                    .setMessage("Check device storage and try again. Your captured photos are kept.")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
         final com.huynhdous.employeefield.core.session.SessionWork.Lease work = host().beginUpload();
         if (work == null) {
+            unsent = true;
+            showUnsentCardIfAny();
             new Popup.Builder(context()).setTitle("Please wait").setMessage("A request is still finishing. Please try again shortly.")
                     .setPositiveButton("OK", null).show();
             return;
@@ -828,9 +929,10 @@ public final class CheckInTab extends TabModule {
 
     void finishSubmission(com.huynhdous.employeefield.core.session.SessionWork.Lease work, String problem, boolean retryable) {
         submitting = false;
+        if (draftStore != null && (problem == null || !retryable)) draftStore.clear(draftId);
         if (!host().isCurrent(work)) {
             // The screen was recreated (a rotation) while this was uploading: the screen that replaced it shows the result.
-            host().leaveOutcome(work, new com.huynhdous.employeefield.core.session.SessionWork.Outcome("checkin", problem == null, retryable, problem));
+            host().leaveOutcome(work, new com.huynhdous.employeefield.core.session.SessionWork.Outcome("checkin", problem == null, retryable, problem, draftId));
             return;
         }
         showResult(problem == null, retryable, problem);
@@ -858,6 +960,7 @@ public final class CheckInTab extends TabModule {
         if (container == null) return;
         String token = host().token();
         for (com.huynhdous.employeefield.core.session.SessionWork.Outcome o : com.huynhdous.employeefield.core.session.SessionWork.takeOutcomes(token, "checkin")) {
+            if (o.reference != null && !o.reference.equals(draftId)) continue;
             showResult(o.success, o.retryable, o.message);
         }
         if (photoFix != null) photoFix.takeOutcomes();
@@ -875,6 +978,13 @@ public final class CheckInTab extends TabModule {
                 .show();
     }
 
+    private void confirmDiscardDraft() {
+        new Popup.Builder(context()).setTitle("Discard this check-in?")
+                .setMessage("The photos will be deleted from this phone and you will have to check in again from the start.")
+                .setPositiveButton("Discard", (d, w) -> clearFlow())
+                .setNegativeButton("Keep it", null).show();
+    }
+
     /** Puts (or removes) the "check-in waiting to be sent" card at the top of the screen, so the retry is never out of reach. */
     private void showUnsentCardIfAny() {
         if (container == null) return;
@@ -883,6 +993,7 @@ public final class CheckInTab extends TabModule {
             unsentCardView = null;
         }
         if (!unsent || activeAssignment == null) return;
+        boolean busy = submitting || com.huynhdous.employeefield.core.session.SessionWork.isBusy(host().token());
         float density = density();
         LinearLayout card = new LinearLayout(context());
         card.setOrientation(LinearLayout.VERTICAL);
@@ -905,6 +1016,7 @@ public final class CheckInTab extends TabModule {
         buttons.setGravity(Gravity.CENTER_VERTICAL);
         Button send = Theme.filledButton(context(), "Send now", Theme.PRIMARY);
         buttons.addView(send);
+        send.setEnabled(!busy);
         send.setOnClickListener(v -> retryAfterCheckingStatus());
         TextView discard = new TextView(context());
         discard.setText("Discard");
@@ -915,16 +1027,9 @@ public final class CheckInTab extends TabModule {
         discard.setGravity(Gravity.CENTER_VERTICAL);
         discard.setPadding((int) (18 * density), 0, (int) (18 * density), 0);
         discard.setClickable(true);
+        discard.setEnabled(!busy);
         buttons.addView(discard);
-        discard.setOnClickListener(v -> new Popup.Builder(context())
-                .setTitle("Discard this check-in?")
-                .setMessage("The photos will be deleted from this phone and you will have to check in again from the start.")
-                .setPositiveButton("Discard", (d, w) -> {
-                    clearFlow();
-                    showUnsentCardIfAny();
-                })
-                .setNegativeButton("Keep it", null)
-                .show());
+        discard.setOnClickListener(v -> confirmDiscardDraft());
         card.addView(buttons);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         params.bottomMargin = (int) (8 * density);

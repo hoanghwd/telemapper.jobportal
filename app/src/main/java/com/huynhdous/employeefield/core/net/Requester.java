@@ -42,7 +42,8 @@ public final class Requester {
     }
     private boolean busy;
     private static final java.util.Set<String> READS = new java.util.HashSet<>(java.util.Arrays.asList(
-            "schedule", "trip", "timesheet/week", "timeclock/day", "telemapper/arrival/assignments",
+            // Recreated activities must verify the running session while an upload still owns its mutation slot.
+            "me", "schedule", "trip", "timesheet/week", "timeclock/day", "telemapper/arrival/assignments",
             "telemapper/disposition/active", "telemapper/followup/my-leads", "telemapper/program/my-program",
             "telemapper/retail-event/my-events", "telemapper/territory/my-route"));
 

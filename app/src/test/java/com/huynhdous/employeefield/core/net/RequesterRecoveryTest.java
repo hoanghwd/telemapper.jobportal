@@ -67,6 +67,52 @@ public class RequesterRecoveryTest {
         assertEquals("feature-error", h.session.token);
     }
 
+    @Test public void recreatedAuthenticationVerifiesDuringAnUploadWithoutAllowingAnotherMutation() throws Exception {
+        Harness h = new Harness("recreated-auth-upload");
+        h.session.employeeId = 0; // App.start() restores the token before me restores the employee.
+        h.activity.getSharedPreferences("employee_field", Activity.MODE_PRIVATE).edit()
+                .putBoolean("tracking_notice_confirmed_7", true).commit();
+        AtomicInteger opened = new AtomicInteger(), ready = new AtomicInteger();
+        Requester requester = h.requester(action -> {
+            assertEquals("me", action);
+            opened.incrementAndGet();
+            return new Connection(new CountDownLatch(0), new CountDownLatch(0),
+                    "{\"success\":true,\"employee_id\":7,\"employee_name\":\"Test Employee\","
+                    + "\"username\":\"test\",\"expires_utc\":\"2030-01-01 00:00:00\",\"program_code\":\"S2S\"}");
+        });
+        com.huynhdous.employeefield.auth.SignOut signOut = new com.huynhdous.employeefield.auth.SignOut(
+                h.activity, h.session, requester,
+                new com.huynhdous.employeefield.location.TrackingStarter(h.activity, h.session), () -> { });
+        try (SessionWork.Lease upload = SessionWork.begin(h.session.token, 7)) {
+            assertNotNull(upload);
+            com.huynhdous.employeefield.auth.AuthFlow auth = new com.huynhdous.employeefield.auth.AuthFlow(
+                    h.activity, h.session, requester, signOut, ready::incrementAndGet);
+            auth.verify();
+            await(() -> ready.get() == 1);
+            assertEquals(7, h.session.employeeId);
+            assertTrue(requester.isBusy()); // The upload still owns the mutation slot.
+            requester.request("timeclock/punch", new JSONObject(), null, data -> fail("Write must stay blocked"), false, null);
+            assertEquals(1, opened.get());
+        } finally {
+            signOut.close();
+        }
+        assertFalse(requester.isBusy());
+    }
+
+    @Test public void sessionVerificationCannotReviveAnEndedSession() throws Exception {
+        Harness h = new Harness("ended-verification");
+        CountDownLatch opened = new CountDownLatch(1), release = new CountDownLatch(1);
+        AtomicInteger answers = new AtomicInteger();
+        Requester requester = h.requester(action -> new Connection(opened, release));
+        requester.request("me", new JSONObject(), null, data -> answers.incrementAndGet(), false, null);
+        try {
+            assertTrue(opened.await(5, TimeUnit.SECONDS));
+            SessionWork.end(h.session.token);
+        } finally { release.countDown(); }
+        await(() -> !requester.isBusy());
+        assertEquals(0, answers.get());
+    }
+
     private static void await(java.util.function.BooleanSupplier condition) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
@@ -92,9 +138,13 @@ public class RequesterRecoveryTest {
 
     private static final class Connection extends HttpsURLConnection {
         final CountDownLatch opened, release;
+        final String payload;
         Connection(CountDownLatch opened, CountDownLatch release) throws java.net.MalformedURLException {
+            this(opened, release, "{\"success\":true}");
+        }
+        Connection(CountDownLatch opened, CountDownLatch release, String payload) throws java.net.MalformedURLException {
             super(new URL("https://example.invalid/"));
-            this.opened = opened; this.release = release;
+            this.opened = opened; this.release = release; this.payload = payload;
         }
         public OutputStream getOutputStream() { return new ByteArrayOutputStream(); }
         public int getResponseCode() throws IOException {
@@ -105,7 +155,7 @@ public class RequesterRecoveryTest {
             return 200;
         }
         public InputStream getInputStream() {
-            return new ByteArrayInputStream("{\"success\":true}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return new ByteArrayInputStream(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
         public void disconnect() { }
         public boolean usingProxy() { return false; }

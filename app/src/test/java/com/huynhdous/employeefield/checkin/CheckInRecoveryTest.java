@@ -20,8 +20,19 @@ import org.robolectric.annotation.Config;
 import static org.junit.Assert.*;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = 28)
+@Config(sdk = 28, shadows = CheckInRecoveryTest.FileProviderShadow.class)
 public class CheckInRecoveryTest {
+    // FileProvider's Android-only slash handling cannot resolve Windows-hosted Robolectric files.
+    // Isolate URI construction; the real manifest/provider configuration is checked by the Android build.
+    @org.robolectric.annotation.Implements(androidx.core.content.FileProvider.class)
+    public static class FileProviderShadow {
+        @org.robolectric.annotation.Implementation
+        protected static android.net.Uri getUriForFile(android.content.Context context, String authority, File file) {
+            return new android.net.Uri.Builder().scheme("content").authority(authority)
+                    .appendPath("test-photos").appendPath(file.getName()).build();
+        }
+    }
+
     private static void set(CheckInTab tab, String name, Object value) throws Exception {
         Field f = CheckInTab.class.getDeclaredField(name); f.setAccessible(true); f.set(tab, value);
     }
@@ -55,6 +66,133 @@ public class CheckInRecoveryTest {
         photo.deleteOnExit();
         ((List<File>) get(tab, "acceptedStorePhotos")).add(photo);
         return photo;
+    }
+
+    private static void invoke(CheckInTab tab, String method, Class<?>[] types, Object... args) throws Exception {
+        java.lang.reflect.Method m = CheckInTab.class.getDeclaredMethod(method, types);
+        m.setAccessible(true); m.invoke(tab, args);
+    }
+
+    @Test public void startingAnotherArrivalKeepsTheWaitingCheckInAndPhotos() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        CheckInTab tab = new CheckInTab(); tab.attach(host(activity, "draft-overwrite", true));
+        JSONObject original = new JSONObject().put("assignment_id", 11).put("site_name", "First store");
+        set(tab, "activeAssignment", original); set(tab, "unsent", true);
+        File photo = addAcceptedPhoto(tab);
+        invoke(tab, "beginArrival", new Class<?>[]{JSONObject.class},
+                new JSONObject().put("assignment_id", 22).put("site_name", "Second store"));
+        assertSame(original, get(tab, "activeAssignment"));
+        assertEquals(Boolean.TRUE, get(tab, "unsent"));
+        assertEquals(1, ((List<?>) get(tab, "acceptedStorePhotos")).size());
+        assertTrue(photo.exists());
+    }
+
+    @Test public void discardDeletesOwnedPhotosButLeavesOtherFilesAlone() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        CheckInTab tab = new CheckInTab(); tab.attach(host(activity, "draft-discard", true));
+        File selfie = new File(activity.getCacheDir(), "selfie_discard.jpg");
+        File store = new File(activity.getCacheDir(), "store_discard.jpg");
+        Files.write(selfie.toPath(), new byte[]{1}); Files.write(store.toPath(), new byte[]{2});
+        File unrelated = addAcceptedPhoto(tab);
+        set(tab, "pendingSelfieFile", selfie); set(tab, "pendingStorePhotoFile", store);
+        invoke(tab, "clearFlow", new Class<?>[]{});
+        assertFalse(selfie.exists()); assertFalse(store.exists());
+        assertTrue(unrelated.exists());
+    }
+
+    @Test public void detachingForRotationDoesNotDeleteCapturedPhotos() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        CheckInTab tab = new CheckInTab(); tab.attach(host(activity, "draft-detach", true));
+        File selfie = new File(activity.getCacheDir(), "selfie_rotation.jpg");
+        Files.write(selfie.toPath(), new byte[]{1});
+        set(tab, "pendingSelfieFile", selfie);
+        tab.onDetach();
+        assertTrue(selfie.exists());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test public void readyCheckInRecoversAfterRestartWithoutSavedActivityState() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        CheckInTab original = new CheckInTab(); original.attach(host(activity, "durable-restart", true));
+        CheckInDraftStore files = new CheckInDraftStore(activity, 5);
+        File selfie = files.newPhoto("selfie_"); File store = files.newPhoto("store_");
+        Files.write(selfie.toPath(), new byte[]{1}); Files.write(store.toPath(), new byte[]{2});
+        set(original, "pendingSelfieFile", selfie);
+        ((List<File>) get(original, "acceptedStorePhotos")).add(store);
+        set(original, "activeAssignment", new JSONObject().put("assignment_id", 31).put("site_name", "Saved store"));
+        set(original, "activeLat", 34.25); set(original, "activeLon", -118.5);
+        invoke(original, "persistReadyDraft", new Class<?>[]{});
+        original.onDetach();
+
+        CheckInTab fresh = new CheckInTab(); fresh.attach(host(activity, "durable-restart", true));
+        fresh.buildContent(new LinearLayout(activity)); // No Bundle from the old activity.
+        assertEquals(Boolean.TRUE, get(fresh, "unsent"));
+        assertEquals(31, ((JSONObject) get(fresh, "activeAssignment")).getInt("assignment_id"));
+        assertEquals(1, ((List<?>) get(fresh, "acceptedStorePhotos")).size());
+        assertEquals(34.25, (Double) get(fresh, "activeLat"), 0.0);
+        invoke(fresh, "clearFlow", new Class<?>[]{});
+        assertNull(files.load()); assertFalse(selfie.exists()); assertFalse(store.exists());
+    }
+
+    @Test public void draftCleanupIsEmployeeScopedAndIgnoresOldUploadIdentities() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        CheckInDraftStore mine = new CheckInDraftStore(activity, 5), other = new CheckInDraftStore(activity, 6);
+        File selfie = mine.newPhoto("selfie_"); File store = mine.newPhoto("store_");
+        Files.write(selfie.toPath(), new byte[]{1}); Files.write(store.toPath(), new byte[]{2});
+        mine.save("new-draft", new JSONObject().put("assignment_id", 4), selfie,
+                java.util.Collections.singletonList(store), 34.0, -118.0);
+        assertNull(other.load());
+        other.deletePhoto(selfie); assertTrue(selfie.exists());
+        mine.clear("old-draft"); assertNotNull(mine.load()); assertTrue(store.exists());
+        mine.clear("new-draft"); assertNull(mine.load()); assertFalse(selfie.exists()); assertFalse(store.exists());
+    }
+
+    @Test public void lateUploadOutcomeDoesNotClearAnotherDraft() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        String token = "late-draft-outcome";
+        CheckInTab tab = new CheckInTab(); tab.attach(host(activity, token, true));
+        tab.buildContent(new LinearLayout(activity));
+        JSONObject newer = new JSONObject().put("assignment_id", 99);
+        set(tab, "activeAssignment", newer); set(tab, "draftId", "newer");
+        SessionWork.postOutcome(token, new SessionWork.Outcome("checkin", true, false, null, "older"));
+        tab.onUploadOutcome();
+        assertSame(newer, get(tab, "activeAssignment"));
+    }
+
+    @Test public void discardCannotRemoveFilesStillBeingUploaded() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        CheckInTab tab = new CheckInTab(); tab.attach(host(activity, "draft-busy", true));
+        File selfie = new File(activity.getCacheDir(), "selfie_busy.jpg");
+        Files.write(selfie.toPath(), new byte[]{1}); set(tab, "pendingSelfieFile", selfie);
+        try (SessionWork.Lease work = SessionWork.begin("draft-busy", 5)) {
+            invoke(tab, "clearFlow", new Class<?>[]{});
+            assertTrue(selfie.exists()); assertSame(selfie, get(tab, "pendingSelfieFile"));
+        }
+        invoke(tab, "clearFlow", new Class<?>[]{});
+        assertFalse(selfie.exists());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test public void completedUploadDuringRotationCannotRestoreAStaleSavedDraft() throws Exception {
+        Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
+        String token = "completed-durable-draft";
+        CheckInTab old = new CheckInTab(); old.attach(host(activity, token, false));
+        CheckInDraftStore files = new CheckInDraftStore(activity, 5);
+        File selfie = files.newPhoto("selfie_"); File store = files.newPhoto("store_");
+        Files.write(selfie.toPath(), new byte[]{1}); Files.write(store.toPath(), new byte[]{2});
+        set(old, "pendingSelfieFile", selfie);
+        ((List<File>) get(old, "acceptedStorePhotos")).add(store);
+        set(old, "activeAssignment", new JSONObject().put("assignment_id", 10));
+        invoke(old, "persistReadyDraft", new Class<?>[]{});
+        Bundle snapshot = new Bundle(); old.saveState(snapshot);
+        old.onDetach();
+        SessionWork.Lease work = SessionWork.begin(token, 5); work.close();
+        old.finishSubmission(work, null);
+        assertNull(files.load()); assertFalse(selfie.exists()); assertFalse(store.exists());
+        CheckInTab fresh = new CheckInTab(); fresh.attach(host(activity, token, true));
+        fresh.buildContent(new LinearLayout(activity)); fresh.restoreState(snapshot);
+        assertNull(get(fresh, "activeAssignment"));
+        assertEquals(Boolean.FALSE, get(fresh, "unsent"));
     }
 
     @Test public void cameraRecreationPreservesVerifiedCoordinates() throws Exception {

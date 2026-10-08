@@ -340,10 +340,11 @@ public final class DayClock {
                 .show();
         Button save = reasonDialog.getButton(Popup.BUTTON_POSITIVE);
         save.setEnabled(false);
+        boolean[] saving = {false};
         reason.addTextChangedListener(new android.text.TextWatcher() {
             public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
             public void onTextChanged(CharSequence s, int start, int before, int count) {
-                save.setEnabled(!s.toString().trim().isEmpty());
+                save.setEnabled(!saving[0] && !s.toString().trim().isEmpty() && s.toString().trim().codePointCount(0, s.toString().trim().length()) <= 500);
             }
             public void afterTextChanged(android.text.Editable s) { }
         });
@@ -353,10 +354,42 @@ public final class DayClock {
                 reason.setError("Enter a reason for the change.");
                 return;
             }
-            save.setEnabled(false);
-            reasonDialog.dismiss();
-            editDialog.dismiss();
-            submitTimeEditQueue(holders, originalEventIds, changed, 0, note);
+            if (saving[0]) return;
+            if (note.codePointCount(0, note.length()) > 500) {
+                reason.setError("Use a reason of up to 500 characters.");
+                return;
+            }
+            saving[0] = true;
+            reason.setEnabled(false);
+            reasonDialog.getButton(Popup.BUTTON_NEGATIVE).setEnabled(false);
+            reasonDialog.setCancelable(false);
+            reasonDialog.setCanceledOnTouchOutside(false);
+            Runnable release = () -> {
+                saving[0] = false;
+                reason.setEnabled(true);
+                save.setEnabled(!reason.getText().toString().trim().isEmpty());
+                reasonDialog.getButton(Popup.BUTTON_NEGATIVE).setEnabled(true);
+                reasonDialog.setCancelable(true);
+                reasonDialog.setCanceledOnTouchOutside(true);
+            };
+            try {
+                JSONObject body = timeEditRequest(holders, originalEventIds, changed, note);
+                host.request("timeclock/correct", body, save, r -> {
+                    release.run();
+                    reasonDialog.dismiss();
+                    editDialog.dismiss();
+                    load();
+                }, false, (status, problem) -> {
+                    release.run();
+                    reason.setError(problem);
+                    return status != 401 && status != 403;
+                });
+                // Requester leaves the button enabled when another mutation already owns the slot.
+                if (save.isEnabled()) release.run();
+            } catch (Exception e) {
+                release.run();
+                reason.setError("Unable to save. Your changes are still here; please try again.");
+            }
         });
         reason.requestFocus();
         if (reasonDialog.getWindow() != null) reasonDialog.getWindow().setSoftInputMode(
@@ -391,24 +424,19 @@ public final class DayClock {
         button.setText(time != null ? java.time.format.DateTimeFormatter.ofPattern("h:mm a").format(time) : "Not set");
     }
 
-    private void submitTimeEditQueue(java.time.LocalTime[][] holders, int[] originalEventIds, java.util.List<Integer> changed, int index, String note) {
-        if (index >= changed.size()) {
-            load();
-            return;
-        }
-        int fieldIndex = changed.get(index);
-        java.time.LocalTime time = holders[fieldIndex][0];
-        try {
-            JSONObject body = new JSONObject()
-                    .put("token", host.token())
-                    .put("work_date", dateKey)
+    private JSONObject timeEditRequest(java.time.LocalTime[][] holders, int[] originalEventIds,
+                                       java.util.List<Integer> changed, String note) throws Exception {
+        JSONArray corrections = new JSONArray();
+        for (int fieldIndex : changed) {
+            java.time.LocalTime time = holders[fieldIndex][0];
+            JSONObject correction = new JSONObject()
                     .put("event_type", TIME_FIELD_TYPES[fieldIndex])
-                    .put("corrected_time", String.format(java.util.Locale.US, "%02d:%02d", time.getHour(), time.getMinute()))
-                    .put("reason", note);
-            if (originalEventIds[fieldIndex] != 0) body.put("original_event_id", originalEventIds[fieldIndex]);
-            host.request("timeclock/correct", body, null, r -> submitTimeEditQueue(holders, originalEventIds, changed, index + 1, note));
-        } catch (Exception ignored) {
+                    .put("corrected_time", String.format(java.util.Locale.US, "%02d:%02d", time.getHour(), time.getMinute()));
+            if (originalEventIds[fieldIndex] != 0) correction.put("original_event_id", originalEventIds[fieldIndex]);
+            corrections.put(correction);
         }
+        return new JSONObject().put("token", host.token()).put("work_date", dateKey)
+                .put("reason", note).put("corrections", corrections);
     }
 
     // ---------------------------------------------------------------- punching in and out
