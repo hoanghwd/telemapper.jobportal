@@ -9,6 +9,7 @@ import android.widget.TextView;
 import com.huynhdous.employeefield.R;
 import com.huynhdous.employeefield.core.tab.TabModule;
 import com.huynhdous.employeefield.core.ui.Theme;
+import com.huynhdous.employeefield.core.ui.TimeCardUi;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -162,17 +163,21 @@ public final class ScheduleTab extends TabModule {
             String dateKey = date.toString();
             boolean isToday = date.equals(today);
 
+            LinearLayout dayCard = TimeCardUi.card(context());
+            LinearLayout.LayoutParams dayParams = new LinearLayout.LayoutParams(-1,-2);
+            dayParams.topMargin = TimeCardUi.dp(context(),14);
+            scheduleContainer.addView(dayCard,dayParams);
             LinearLayout headerRow = new LinearLayout(context());
             headerRow.setOrientation(LinearLayout.HORIZONTAL);
             headerRow.setGravity(Gravity.CENTER_VERTICAL);
-            headerRow.setPadding(0, (int) (18 * density), 0, (int) (6 * density));
-            scheduleContainer.addView(headerRow);
+            headerRow.setPadding(0,0,0,TimeCardUi.dp(context(),8));
+            dayCard.addView(headerRow);
 
             TextView header = new TextView(context());
-            header.setText((DAY_NAMES[i] + " " + date.getMonthValue() + "/" + date.getDayOfMonth()).toUpperCase());
-            header.setTextSize(12);
+            header.setText(date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMM d",java.util.Locale.US)));
+            header.setTextSize(15);
             header.setTypeface(header.getTypeface(), android.graphics.Typeface.BOLD);
-            header.setTextColor(isToday ? Theme.PRIMARY : Theme.NEUTRAL);
+            header.setTextColor(isToday ? Theme.PRIMARY : Theme.TEXT_PRIMARY);
             headerRow.addView(header);
 
             if (isToday) {
@@ -184,14 +189,14 @@ public final class ScheduleTab extends TabModule {
 
             java.util.List<JSONObject> rows = byDate.get(dateKey);
             if (rows == null || rows.isEmpty()) {
-                addRow(DAY_CODES[i], 0xfff3f4f6, 0xff9ca3af, "No assignments", null, density);
+                addRow(DAY_CODES[i], 0xfff3f4f6, 0xff9ca3af, "No assignments", null, density, dayCard);
                 continue;
             }
             for (JSONObject a : rows) {
                 String startTime = a.getString("start_time"), endTime = a.getString("end_time");
                 addRow(DAY_CODES[i], isToday ? Theme.PRIMARY : 0xffe5e7eb, isToday ? 0xffffffff : Theme.NEUTRAL,
                         a.optString("location_name", "Unknown location"),
-                        startTime.substring(0, 5) + " – " + endTime.substring(0, 5), density);
+                        startTime.substring(0, 5) + " – " + endTime.substring(0, 5), density, dayCard);
                 int shiftMinutes = shiftMinutes(a);
                 weekMinutesScheduled += shiftMinutes;
                 if (isToday) todayMinutesScheduled += shiftMinutes;
@@ -199,7 +204,7 @@ public final class ScheduleTab extends TabModule {
             if (date.isAfter(today)) continue;
             LinearLayout timeClockContainer = host().gate().newDimmedColumn(context());
             timeClockContainer.setOrientation(LinearLayout.VERTICAL);
-            scheduleContainer.addView(timeClockContainer);
+            dayCard.addView(timeClockContainer);
             boolean withinWindow = false;
             java.time.LocalTime nextStart = null;
             if (isToday) {
@@ -259,22 +264,21 @@ public final class ScheduleTab extends TabModule {
     }
 
     /** One shift (or "No assignments") as a card: a round day code, the place and the hours. */
-    private void addRow(String avatarText, int avatarBg, int avatarTextColor, String title, String subtitle, float density) {
+    private void addRow(String avatarText, int avatarBg, int avatarTextColor, String title, String subtitle, float density, LinearLayout parent) {
         LinearLayout row = new LinearLayout(context());
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding((int) (14 * density), (int) (12 * density), (int) (14 * density), (int) (12 * density));
-        row.setBackground(Theme.cardBackground(context()));
+        row.setPadding(0, (int) (8 * density), 0, (int) (8 * density));
 
         TextView avatar = new TextView(context());
         avatar.setText(avatarText);
-        avatar.setTextColor(avatarTextColor);
+        avatar.setTextColor(Theme.PRIMARY);
         avatar.setTextSize(12);
         avatar.setTypeface(avatar.getTypeface(), android.graphics.Typeface.BOLD);
         avatar.setGravity(Gravity.CENTER);
         android.graphics.drawable.GradientDrawable circle = new android.graphics.drawable.GradientDrawable();
         circle.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-        circle.setColor(avatarBg);
+        circle.setColor(0xffedf2ff);
         avatar.setBackground(circle);
         int size = (int) (36 * density);
         row.addView(avatar, new LinearLayout.LayoutParams(size, size));
@@ -287,7 +291,7 @@ public final class ScheduleTab extends TabModule {
 
         TextView titleView = new TextView(context());
         titleView.setText(title);
-        titleView.setTextSize(15);
+        titleView.setTextSize(14);
         titleView.setTextColor(Theme.TEXT_PRIMARY);
         textStack.addView(titleView);
 
@@ -301,6 +305,6 @@ public final class ScheduleTab extends TabModule {
 
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         cardParams.topMargin = (int) (8 * density);
-        scheduleContainer.addView(row, cardParams);
+        parent.addView(row, cardParams);
     }
 }

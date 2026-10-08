@@ -7,6 +7,7 @@ import android.widget.TextView;
 import com.huynhdous.employeefield.R;
 import com.huynhdous.employeefield.core.tab.TabModule;
 import com.huynhdous.employeefield.core.ui.Theme;
+import com.huynhdous.employeefield.core.ui.TimeCardUi;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -41,18 +42,20 @@ public final class TimesheetTab extends TabModule {
         LinearLayout summaryCard = new LinearLayout(context());
         summaryCard.setOrientation(LinearLayout.VERTICAL);
         summaryCard.setPadding((int) (16 * density), (int) (16 * density), (int) (16 * density), (int) (16 * density));
-        summaryCard.setBackground(Theme.cardBackground(context()));
+        android.graphics.drawable.GradientDrawable hero=new android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR,new int[]{0xff153572,0xff255be0});
+        hero.setCornerRadius(TimeCardUi.dp(context(),18));summaryCard.setBackground(hero);
+        summaryCard.addView(TimeCardUi.text(context(),"WEEKLY HOURS",11,0xffcbdcff,true));
         content.addView(summaryCard);
 
         message = new TextView(context());
         message.setTextSize(13);
-        message.setTextColor(Theme.TEXT_SECONDARY);
+        message.setTextColor(0xffd9e4ff);
         summaryCard.addView(message);
 
         totalText = new TextView(context());
-        totalText.setTextSize(28);
+        totalText.setTextSize(36);
         totalText.setTypeface(totalText.getTypeface(), android.graphics.Typeface.BOLD);
-        totalText.setTextColor(Theme.PRIMARY);
+        totalText.setTextColor(0xffffffff);
         summaryCard.addView(totalText);
 
         badgeRow = new LinearLayout(context());
@@ -124,7 +127,7 @@ public final class TimesheetTab extends TabModule {
 
             LinearLayout dayCard = new LinearLayout(context());
             dayCard.setOrientation(LinearLayout.VERTICAL);
-            dayCard.setPadding((int) (14 * density), (int) (10 * density), (int) (14 * density), (int) (10 * density));
+            dayCard.setPadding((int) (18 * density), (int) (16 * density), (int) (18 * density), (int) (16 * density));
             dayCard.setBackground(Theme.cardBackground(context()));
             LinearLayout.LayoutParams dayCardParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
             dayCardParams.topMargin = (int) (8 * density);
@@ -134,24 +137,33 @@ public final class TimesheetTab extends TabModule {
             dayRow.setOrientation(LinearLayout.HORIZONTAL);
             dayRow.setGravity(Gravity.CENTER_VERTICAL);
             dayCard.addView(dayRow);
+            TextView calendar=TimeCardUi.text(context(),String.valueOf(date.getDayOfMonth()),17,Theme.PRIMARY,true);
+            calendar.setGravity(Gravity.CENTER);calendar.setBackground(TimeCardUi.background(context(),0xffedf2ff,12));
+            LinearLayout.LayoutParams calendarParams=new LinearLayout.LayoutParams(TimeCardUi.dp(context(),42),TimeCardUi.dp(context(),42));
+            calendarParams.rightMargin=TimeCardUi.dp(context(),12);dayRow.addView(calendar,calendarParams);
 
             TextView dayLabel = new TextView(context());
             dayLabel.setText(dayFormat.format(date));
             dayLabel.setTextSize(14);
+            dayLabel.setTypeface(null,android.graphics.Typeface.BOLD);
             dayLabel.setTextColor(Theme.TEXT_PRIMARY);
             dayRow.addView(dayLabel, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
             TextView hoursLabel = new TextView(context());
             if (netMinutes != null)
                 hoursLabel.setText(String.format(java.util.Locale.US, "%dh %02dm", netMinutes / 60, netMinutes % 60));
-            else if (inProgress) hoursLabel.setText("In progress");
-            else if (incomplete) hoursLabel.setText("Missing clock-out");
+            else if (inProgress) hoursLabel.setText("—");
+            else if (incomplete) hoursLabel.setText("—");
             else hoursLabel.setText("—");
-            hoursLabel.setTextSize(14);
+            hoursLabel.setTextSize(19);
             hoursLabel.setTypeface(hoursLabel.getTypeface(), android.graphics.Typeface.BOLD);
             hoursLabel.setTextColor(incomplete ? Theme.ERROR : inProgress ? Theme.PRIMARY : Theme.TEXT_PRIMARY);
             dayRow.addView(hoursLabel);
 
+            if(inProgress || incomplete) {
+                TextView stateBadge=Theme.statusBadge(context(),incomplete?"Missing clock-out":"In progress",incomplete?Theme.ERROR:Theme.PRIMARY);
+                LinearLayout.LayoutParams stateParams=new LinearLayout.LayoutParams(-2,-2);stateParams.topMargin=TimeCardUi.dp(context(),10);dayCard.addView(stateBadge,stateParams);
+            }
             if (hasDispute) {
                 TextView conflictBadge = Theme.statusBadge(context(), "⚠ Conflict", Theme.ERROR);
                 LinearLayout.LayoutParams conflictParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -173,6 +185,7 @@ public final class TimesheetTab extends TabModule {
 
     private void addBadge(LinearLayout row, String text, int color, float density) {
         TextView badge = Theme.statusBadge(context(), text, color);
+        badge.setTextColor(0xffffffff);badge.setBackground(TimeCardUi.background(context(),0x33ffffff,20));
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         params.rightMargin = (int) (6 * density);
         row.addView(badge, params);

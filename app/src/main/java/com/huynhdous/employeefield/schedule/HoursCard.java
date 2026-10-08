@@ -13,6 +13,7 @@ import com.huynhdous.employeefield.core.tab.AppHost;
 import com.huynhdous.employeefield.core.tab.Tabs;
 import com.huynhdous.employeefield.core.ui.DayProgressRing;
 import com.huynhdous.employeefield.core.ui.Theme;
+import com.huynhdous.employeefield.core.ui.TimeCardUi;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -32,11 +33,11 @@ final class HoursCard {
     /** A circular progress gauge: a ring with its value text centered inside it, plus a caption below. */
     private static final class Gauge {
         final LinearLayout column;
-        final DayProgressRing ring;
+        final android.widget.ProgressBar ring;
         final TextView centerText;
         final TextView subText;
 
-        Gauge(LinearLayout column, DayProgressRing ring, TextView centerText, TextView subText) {
+        Gauge(LinearLayout column, android.widget.ProgressBar ring, TextView centerText, TextView subText) {
             this.column = column;
             this.ring = ring;
             this.centerText = centerText;
@@ -64,14 +65,17 @@ final class HoursCard {
         card.setBackground(Theme.cardBackground(context));
         card.setVisibility(View.GONE);
 
+        card.addView(TimeCardUi.text(context,"Hours overview",16,Theme.TEXT_PRIMARY,true));
         LinearLayout gaugeRow = new LinearLayout(context);
         gaugeRow.setOrientation(LinearLayout.HORIZONTAL);
-        card.addView(gaugeRow);
+        LinearLayout.LayoutParams gauges = new LinearLayout.LayoutParams(-1,-2);
+        gauges.topMargin=TimeCardUi.dp(context,14);
+        card.addView(gaugeRow,gauges);
 
         dayGauge = buildGauge("Today", "of 8h", density);
         weekGauge = buildGauge("This Week", "of 40h", density);
         gaugeRow.addView(dayGauge.column, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        gaugeRow.addView(weekGauge.column, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout.LayoutParams weekParams=new LinearLayout.LayoutParams(0,-2,1f);weekParams.leftMargin=TimeCardUi.dp(context,12);gaugeRow.addView(weekGauge.column,weekParams);
 
         clockInText = new TextView(context);
         clockInText.setTextSize(13);
@@ -82,7 +86,9 @@ final class HoursCard {
         card.addView(clockInText, clockInParams);
 
         TextView details = new TextView(context);
-        details.setText("Details");
+        details.setText("View weekly timesheet  →");
+        details.setMinHeight(TimeCardUi.dp(context,44));
+        details.setGravity(Gravity.CENTER);
         details.setTextSize(13);
         details.setTypeface(details.getTypeface(), android.graphics.Typeface.BOLD);
         details.setTextColor(Theme.PRIMARY);
@@ -104,22 +110,14 @@ final class HoursCard {
         column.setOrientation(LinearLayout.VERTICAL);
         column.setGravity(Gravity.CENTER_HORIZONTAL);
 
-        int size = (int) (92 * density);
-        FrameLayout frame = new FrameLayout(context);
-        column.addView(frame, new LinearLayout.LayoutParams(size, size));
-
-        DayProgressRing ring = new DayProgressRing(context);
-        frame.addView(ring, new FrameLayout.LayoutParams(size, size));
-
-        LinearLayout centerColumn = new LinearLayout(context);
-        centerColumn.setOrientation(LinearLayout.VERTICAL);
-        centerColumn.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams centerParams = new FrameLayout.LayoutParams(size, size);
-        centerParams.gravity = Gravity.CENTER;
-        frame.addView(centerColumn, centerParams);
-
+        column.setPadding(TimeCardUi.dp(context,12),TimeCardUi.dp(context,14),TimeCardUi.dp(context,12),TimeCardUi.dp(context,14));
+        column.setBackground(TimeCardUi.background(context,0xfff0f4ff,12));
+        column.addView(TimeCardUi.text(context,caption,12,Theme.NEUTRAL,true));
+        LinearLayout centerColumn = column;
+        android.widget.ProgressBar ring = new android.widget.ProgressBar(context,null,android.R.attr.progressBarStyleHorizontal);
+        ring.setMax(1000);ring.setProgressBackgroundTintList(android.content.res.ColorStateList.valueOf(Theme.OUTLINE));
         TextView centerText = new TextView(context);
-        centerText.setTextSize(16);
+        centerText.setTextSize(23);
         centerText.setTypeface(centerText.getTypeface(), android.graphics.Typeface.BOLD);
         centerText.setTextColor(Theme.TEXT_PRIMARY);
         centerText.setGravity(Gravity.CENTER);
@@ -127,21 +125,19 @@ final class HoursCard {
 
         TextView subText = new TextView(context);
         subText.setText(subLabel);
-        subText.setTextSize(10);
+        subText.setTextSize(11);
         subText.setTextColor(Theme.TEXT_SECONDARY);
         subText.setGravity(Gravity.CENTER);
         centerColumn.addView(subText);
 
-        TextView label = new TextView(context);
-        label.setText(caption);
-        label.setTextSize(12);
-        label.setTypeface(label.getTypeface(), android.graphics.Typeface.BOLD);
-        label.setTextColor(Theme.TEXT_SECONDARY);
-        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        labelParams.topMargin = (int) (8 * density);
-        column.addView(label, labelParams);
-
+        LinearLayout.LayoutParams progressParams=new LinearLayout.LayoutParams(-1,TimeCardUi.dp(context,6));
+        progressParams.topMargin=TimeCardUi.dp(context,12);column.addView(ring,progressParams);
         return new Gauge(column, ring, centerText, subText);
+    }
+
+    private static void setProgress(Gauge gauge,float fraction,int color) {
+        gauge.ring.setProgress(Math.round(Math.max(0,Math.min(1,fraction))*1000));
+        gauge.ring.setProgressTintList(android.content.res.ColorStateList.valueOf(color));
     }
 
     /** What the schedule says this week and today, in minutes (the rings' targets). */
@@ -200,7 +196,7 @@ final class HoursCard {
         card.setVisibility(View.VISIBLE);
         dayGauge.centerText.setText(String.format(java.util.Locale.US, "%dh %02dm", workMinutes / 60, workMinutes % 60));
         dayGauge.subText.setText(formatHoursShort(todayScheduledMinutes));
-        dayGauge.ring.setProgress(workMinutes / (float) todayScheduledMinutes, stillWorking ? Theme.PRIMARY : Theme.SUCCESS);
+        setProgress(dayGauge,workMinutes / (float) todayScheduledMinutes,stillWorking?Theme.PRIMARY:Theme.SUCCESS);
         clockInText.setText(firstClockIn == null ? "Not clocked in yet" : "Clocked in at " + firstClockIn);
     }
 
@@ -216,7 +212,7 @@ final class HoursCard {
         int target = weekScheduledMinutes > 0 ? weekScheduledMinutes : Config.WORK_WEEKLY_TARGET_MINUTES;
         weekGauge.centerText.setText(String.format(java.util.Locale.US, "%dh %02dm", weekWorkedMinutes / 60, weekWorkedMinutes % 60));
         weekGauge.subText.setText(formatHoursShort(target));
-        weekGauge.ring.setProgress(weekWorkedMinutes / (float) target, weekWorkedMinutes >= target ? Theme.SUCCESS : Theme.PRIMARY);
+        setProgress(weekGauge,weekWorkedMinutes / (float) target,weekWorkedMinutes>=target?Theme.SUCCESS:Theme.PRIMARY);
     }
 
     /** Fetch the week's worked total for the "This Week" ring. */

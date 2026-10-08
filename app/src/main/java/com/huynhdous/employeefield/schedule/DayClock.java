@@ -12,6 +12,7 @@ import com.huynhdous.employeefield.R;
 import com.huynhdous.employeefield.core.tab.AppHost;
 import com.huynhdous.employeefield.core.ui.Popup;
 import com.huynhdous.employeefield.core.ui.Theme;
+import com.huynhdous.employeefield.core.ui.TimeCardUi;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -158,7 +159,9 @@ public final class DayClock {
             container.addView(flagged);
         } else {
             TextView flagLink = new TextView(context());
-            flagLink.setText("Flag an issue with this day");
+            flagLink.setText("Report an issue");
+            flagLink.setMinHeight(TimeCardUi.dp(context(),48));
+            flagLink.setGravity(Gravity.CENTER_VERTICAL);
             flagLink.setTextColor(Theme.NEUTRAL);
             flagLink.setTextSize(13);
             flagLink.setPadding(0, (int) (10 * density), 0, (int) (4 * density));
@@ -167,7 +170,10 @@ public final class DayClock {
         }
 
         TextView editLink = new TextView(context());
-        editLink.setText(isToday ? "Edit today's times" : "Edit this day's times");
+        editLink.setText("Edit time entries  →");
+        editLink.setMinHeight(TimeCardUi.dp(context(),48));
+        editLink.setGravity(Gravity.CENTER_VERTICAL);
+        editLink.setTypeface(null,android.graphics.Typeface.BOLD);
         editLink.setTextColor(Theme.PRIMARY);
         editLink.setTextSize(13);
         editLink.setPadding(0, (int) (4 * density), 0, (int) (4 * density));
@@ -226,43 +232,22 @@ public final class DayClock {
                 totalWorkMinutes += java.time.Duration.between(start, end).toMinutes();
             }
         }
-        TextView totalView = new TextView(context());
-        totalView.setText(String.format(java.util.Locale.US, "Worked hrs: %d:%02d", totalWorkMinutes / 60, totalWorkMinutes % 60));
-        totalView.setTextSize(14);
-        totalView.setTypeface(null, android.graphics.Typeface.BOLD);
-        totalView.setTextColor(Theme.PRIMARY);
-        totalView.setPadding(0, (int) (6 * density), 0, (int) (4 * density));
-        container.addView(totalView);
-
+        TimeCardUi.divider(container);
+        LinearLayout totalRow = new LinearLayout(context());
+        totalRow.setGravity(Gravity.CENTER_VERTICAL);
+        totalRow.addView(TimeCardUi.text(context(), "Hours worked", 12, Theme.NEUTRAL, false),new LinearLayout.LayoutParams(0,-2,1));
+        totalRow.addView(TimeCardUi.text(context(),String.format(java.util.Locale.US,"%dh %02dm",totalWorkMinutes/60,totalWorkMinutes%60),22,Theme.TEXT_PRIMARY,true));
+        container.addView(totalRow);
         for (Object[] seg : segments) {
-            String label = (String) seg[0];
-            java.time.Instant start = (java.time.Instant) seg[1];
-            java.time.Instant end = (java.time.Instant) seg[2];
-            String rowLabel = label.equals("work") ? "In" : label.equals("lunch") ? "Lunch" : "Break";
-            int badgeColor = label.equals("work") ? Theme.SUCCESS : Theme.WARNING;
-            StringBuilder text = new StringBuilder(clock.format(start)).append(" to ").append(end != null ? clock.format(end) : "—");
-            if (end != null) {
-                long minutes = java.time.Duration.between(start, end).toMinutes();
-                text.append("  ·  ").append(label.equals("work") ? (minutes / 60) + ":" + String.format(java.util.Locale.US, "%02d", minutes % 60) : minutes + " min");
+            String kind = (String) seg[0];
+            java.time.Instant start = (java.time.Instant) seg[1], end = (java.time.Instant) seg[2];
+            String label = kind.equals("work") ? "Work" : kind.equals("lunch") ? "Lunch" : "Paid break";
+            String duration = "Live";
+            if(end!=null) {
+                long minutes = java.time.Duration.between(start,end).toMinutes();
+                duration = minutes >= 60 ? String.format(java.util.Locale.US,"%dh %02dm",minutes/60,minutes%60) : minutes+" min";
             }
-
-            LinearLayout row = new LinearLayout(context());
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(0, (int) (3 * density), 0, (int) (3 * density));
-
-            TextView badge = Theme.statusBadge(context(), rowLabel, badgeColor);
-            LinearLayout.LayoutParams badgeParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            badgeParams.rightMargin = (int) (8 * density);
-            row.addView(badge, badgeParams);
-
-            TextView detailView = new TextView(context());
-            detailView.setText(text.toString());
-            detailView.setTextSize(13);
-            detailView.setTextColor(Theme.TEXT_SECONDARY);
-            row.addView(detailView);
-
-            container.addView(row);
+            TimeCardUi.segment(container,label,clock.format(start)+" – "+(end!=null?clock.format(end):"Now"),duration,kind.equals("work")?Theme.PRIMARY:0xffb86b0c);
         }
     }
 
