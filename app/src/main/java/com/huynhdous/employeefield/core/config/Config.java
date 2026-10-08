@@ -37,6 +37,8 @@ public final class Config {
     public static final int CHECKIN_MAX_STORE_PHOTOS = BuildConfig.CHECKIN_MAX_STORE_PHOTOS;
     public static final long CHECKIN_LOCATION_TIMEOUT_MS = BuildConfig.CHECKIN_LOCATION_TIMEOUT_SECONDS * 1000L;
 
+    public static final int TIMESHEET_MAX_WEEKS = BuildConfig.TIMESHEET_MAX_WEEKS;
+
     // Work hours
     public static final int WORK_DAILY_TARGET_MINUTES = BuildConfig.WORK_DAILY_TARGET_MINUTES;
     public static final int WORK_WEEKLY_TARGET_MINUTES = BuildConfig.WORK_WEEKLY_TARGET_MINUTES;

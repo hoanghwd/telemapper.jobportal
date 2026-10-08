@@ -39,4 +39,16 @@ public final class TimeCardUi {
         amount.setPadding(dp(c,8),dp(c,6),dp(c,8),dp(c,6));amount.setBackground(background(c,kind.equals("Work")?0xffedf5ff:0xfffff5e6,8));
         row.addView(amount,new LinearLayout.LayoutParams(-2,-2));parent.addView(row);
     }
+    /** A compact lock with text, rather than relying on a font's emoji rendering. */
+    public static android.widget.TextView lockedBadge(android.content.Context context, String label) {
+        android.widget.TextView badge = Theme.statusBadge(context, label, Theme.SUCCESS);
+        android.graphics.drawable.Drawable lock = context.getDrawable(com.huynhdous.employeefield.R.drawable.ic_lock);
+        if (lock != null) {
+            lock.setTint(Theme.SUCCESS);
+            lock.setBounds(0, 0, dp(context, 16), dp(context, 16));
+            badge.setCompoundDrawables(lock, null, null, null);
+            badge.setCompoundDrawablePadding(dp(context, 6));
+        }
+        return badge;
+    }
 }

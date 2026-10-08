@@ -34,6 +34,7 @@ public final class DayClock {
     private final java.time.ZoneId zone;
     private final boolean isToday;
     private final HoursCard hours;
+    private boolean accountingLocked;
 
     DayClock(AppHost host, LinearLayout container, String dateKey, boolean withinWindow, java.time.LocalTime nextStart, java.time.ZoneId zone, boolean isToday, HoursCard hours) {
         this.host = host;
@@ -45,6 +46,8 @@ public final class DayClock {
         this.isToday = isToday;
         this.hours = hours;
     }
+
+    void setAccountingLocked(boolean locked) { accountingLocked = locked; }
 
     private Activity context() {
         return host.activity();
@@ -75,11 +78,22 @@ public final class DayClock {
 
     /** Same, and run {@code afterRendered} once it is drawn (used to load the days one after another). If the fetch itself fails the
      * app shows its error and {@code afterRendered} does not run -- as before. */
-    void load(Runnable afterRendered) {
+    void load(Runnable afterRendered) { load(afterRendered, () -> true); }
+
+    void load(Runnable afterRendered, java.util.function.BooleanSupplier active) {
         try {
             host.request("timeclock/day", new JSONObject().put("token", host.token()).put("work_date", dateKey), null, r -> {
+                if (!active.getAsBoolean()) return;
+                if (r.has("locked")) accountingLocked = r.getBoolean("locked");
                 render(r.getJSONArray("events"), r.optJSONObject("dispute"));
                 if (afterRendered != null) afterRendered.run();
+            }, true, (status, problem) -> {
+                if (active.getAsBoolean()) {
+                    container.removeAllViews();
+                    container.addView(TimeCardUi.text(context(), "Unable to load time entries. Tap Refresh to retry.", 12, Theme.ERROR, false));
+                    if (afterRendered != null) afterRendered.run();
+                }
+                return true;
             });
         } catch (Exception ignored) {
             if (afterRendered != null) afterRendered.run();
@@ -113,7 +127,7 @@ public final class DayClock {
             doneParams.topMargin = (int) (4 * density);
             doneParams.bottomMargin = (int) (8 * density);
             container.addView(doneText, doneParams);
-        } else if (isToday) {
+        } else if (isToday && !accountingLocked) {
             LinearLayout buttonRow = new LinearLayout(context());
             buttonRow.setOrientation(LinearLayout.HORIZONTAL);
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -157,7 +171,7 @@ public final class DayClock {
             flagged.setTextSize(13);
             flagged.setPadding(0, (int) (4 * density), 0, (int) (4 * density));
             container.addView(flagged);
-        } else {
+        } else if (!accountingLocked) {
             TextView flagLink = new TextView(context());
             flagLink.setText("Report an issue");
             flagLink.setMinHeight(TimeCardUi.dp(context(),48));
@@ -168,6 +182,8 @@ public final class DayClock {
             flagLink.setOnClickListener(v -> showFlagDialog());
             container.addView(flagLink);
         }
+
+        if (accountingLocked) return;
 
         TextView editLink = new TextView(context());
         editLink.setText("Edit time entries  →");
@@ -254,6 +270,7 @@ public final class DayClock {
     // ---------------------------------------------------------------- edit times
 
     private void showEditTimesDialog(JSONArray events) throws Exception {
+        if (accountingLocked) return;
         float density = context().getResources().getDisplayMetrics().density;
         int pad = (int) (16 * density);
 
@@ -441,6 +458,7 @@ public final class DayClock {
     }
 
     private void punch(String eventType, Button button) {
+        if (accountingLocked) return;
         // Going to lunch or on break with a door still open means that visit (and its photo/outcome)
         // never gets closed out until he's back -- ask him to confirm instead of letting it slip silently.
         if ("start_lunch".equals(eventType) || "start_break".equals(eventType)) {
@@ -504,6 +522,7 @@ public final class DayClock {
     }
 
     private void doPunch(String eventType, Button button) {
+        if (accountingLocked) return;
         try {
             host.request("timeclock/punch", new JSONObject().put("token", host.token()).put("event_type", eventType).put("work_date", dateKey), button,
                     r -> load(), false, null);
@@ -514,6 +533,7 @@ public final class DayClock {
     // ---------------------------------------------------------------- flagging a day
 
     private void showFlagDialog() {
+        if (accountingLocked) return;
         EditText input = new EditText(context());
         input.setHint("What's wrong with this day's record?");
         input.setMinLines(2);
@@ -530,6 +550,7 @@ public final class DayClock {
     }
 
     private void flag(String note) {
+        if (accountingLocked) return;
         try {
             host.request("timeclock/dispute", new JSONObject().put("token", host.token()).put("work_date", dateKey).put("note", note), null, r -> load());
         } catch (Exception ignored) {

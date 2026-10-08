@@ -18,6 +18,30 @@ public final class TimesheetTab extends TabModule {
     private TextView totalText;
     private LinearLayout badgeRow;
     private TextView message;
+    private TextView periodButton;
+    private TextView summaryTitle;
+    private int previousWeeks;
+    private int generation;
+
+    private String periodLabel() {
+        return previousWeeks == 0 ? "This week" : previousWeeks == 1 ? "Last week" : "Last " + previousWeeks + " weeks";
+    }
+
+    private void choosePeriod() {
+        com.huynhdous.employeefield.core.ui.WeekPeriodPicker.show(context(), previousWeeks, this::selectPeriod);
+    }
+
+    private void selectPeriod(int weeks) {
+        previousWeeks = weeks;
+        periodButton.setText(periodLabel() + " ▾");
+        load();
+    }
+
+    @Override public void saveState(android.os.Bundle out) { out.putInt("timesheet.previousWeeks", previousWeeks); }
+    @Override public void restoreState(android.os.Bundle state) {
+        previousWeeks = Math.max(0, Math.min(com.huynhdous.employeefield.core.config.Config.TIMESHEET_MAX_WEEKS, state.getInt("timesheet.previousWeeks", 0)));
+        if (periodButton != null) periodButton.setText(periodLabel() + " ▾");
+    }
 
     @Override
     public String title() {
@@ -36,7 +60,20 @@ public final class TimesheetTab extends TabModule {
         LinearLayout refresh = Theme.iconTextButton(context(), R.drawable.ic_refresh, "Refresh", Theme.PRIMARY);
         LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         refreshParams.bottomMargin = (int) (8 * density);
-        content.addView(refresh, refreshParams);
+        LinearLayout controls = new LinearLayout(context());
+        controls.setGravity(Gravity.CENTER_VERTICAL);
+        periodButton = TimeCardUi.text(context(), periodLabel() + " ▾", 14, Theme.TEXT_PRIMARY, true);
+        periodButton.setGravity(Gravity.CENTER_VERTICAL);
+        periodButton.setPadding(TimeCardUi.dp(context(), 14), 0, TimeCardUi.dp(context(), 10), 0);
+        periodButton.setBackground(Theme.cardBackground(context()));
+        periodButton.setContentDescription("Choose time sheet period");
+        periodButton.setOnClickListener(v -> choosePeriod());
+        LinearLayout.LayoutParams periodParams = new LinearLayout.LayoutParams(0, TimeCardUi.dp(context(), 48), 1f);
+        periodParams.rightMargin = TimeCardUi.dp(context(), 10);
+        controls.addView(periodButton, periodParams);
+        controls.addView(refresh);
+        content.addView(controls, new LinearLayout.LayoutParams(-1, -2));
+        controls.setPadding(0, 0, 0, TimeCardUi.dp(context(), 12));
         refresh.setOnClickListener(v -> load());
 
         LinearLayout summaryCard = new LinearLayout(context());
@@ -44,7 +81,8 @@ public final class TimesheetTab extends TabModule {
         summaryCard.setPadding((int) (16 * density), (int) (16 * density), (int) (16 * density), (int) (16 * density));
         android.graphics.drawable.GradientDrawable hero=new android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR,new int[]{0xff153572,0xff255be0});
         hero.setCornerRadius(TimeCardUi.dp(context(),18));summaryCard.setBackground(hero);
-        summaryCard.addView(TimeCardUi.text(context(),"WEEKLY HOURS",11,0xffcbdcff,true));
+        summaryTitle = TimeCardUi.text(context(),"WEEKLY HOURS",11,0xffcbdcff,true);
+        summaryCard.addView(summaryTitle);
         content.addView(summaryCard);
 
         message = new TextView(context());
@@ -78,6 +116,9 @@ public final class TimesheetTab extends TabModule {
 
     @Override
     public void onDetach() {
+        generation++;
+        periodButton = null;
+        summaryTitle = null;
         daysContainer = null;
         totalText = null;
         badgeRow = null;
@@ -86,12 +127,48 @@ public final class TimesheetTab extends TabModule {
 
     private void load() {
         if (message == null) return;
-        message.setText("Loading…");
+        int requestGeneration = ++generation;
+        int weeks = previousWeeks;
+        message.setText("Loading " + periodLabel().toLowerCase(java.util.Locale.US) + "…");
+        summaryTitle.setText(weeks <= 1 ? "WEEKLY HOURS" : "TOTAL HOURS");
+        totalText.setText("—");
+        badgeRow.removeAllViews();
+        daysContainer.removeAllViews();
+        requestWeek(null, requestGeneration, current -> {
+            if (weeks == 0) render(current);
+            else loadPrevious(java.time.LocalDate.parse(current.getString("week_start")), weeks, 0,
+                    requestGeneration, new java.util.ArrayList<>());
+        });
+    }
+
+    private void loadPrevious(java.time.LocalDate currentStart, int count, int index, int requestGeneration,
+                              java.util.List<JSONObject> sheets) {
+        if (generation != requestGeneration || message == null) return;
+        message.setText("Loading week " + (index + 1) + " of " + count + "…");
+        java.time.LocalDate start = currentStart.minusWeeks(count - index);
+        requestWeek(start.toString(), requestGeneration, sheet -> {
+            if (!start.toString().equals(sheet.getString("week_start"))) throw new IllegalArgumentException("Unexpected week");
+            sheets.add(sheet);
+            if (sheets.size() == count) render(TimesheetPeriod.combine(sheets));
+            else loadPrevious(currentStart, count, index + 1, requestGeneration, sheets);
+        });
+    }
+
+    private void requestWeek(String start, int requestGeneration, com.huynhdous.employeefield.core.tab.AppHost.Result result) {
         try {
-            host().request("timesheet/week", new JSONObject().put("token", host().token()), null, this::render);
-        } catch (Exception e) {
-            message.setText("Unable to load timesheet.");
-        }
+            JSONObject body = new JSONObject().put("token", host().token());
+            if (start != null) body.put("week_start", start);
+            host().request("timesheet/week", body, null, data -> {
+                if (generation != requestGeneration || message == null) return;
+                try { result.accept(data); } catch (Exception e) { loadFailed(requestGeneration); }
+            }, true, (status, problem) -> { loadFailed(requestGeneration); return true; });
+        } catch (Exception e) { loadFailed(requestGeneration); }
+    }
+
+    private void loadFailed(int requestGeneration) {
+        if (generation != requestGeneration || message == null) return;
+        message.setText("Unable to load this period. Tap Refresh to try again.");
+        totalText.setText("—"); badgeRow.removeAllViews(); daysContainer.removeAllViews();
     }
 
     private void render(JSONObject data) throws Exception {
@@ -99,8 +176,8 @@ public final class TimesheetTab extends TabModule {
         float density = density();
         String weekStart = data.getString("week_start"), weekEnd = data.getString("week_end");
         java.time.LocalDate start = java.time.LocalDate.parse(weekStart), end = java.time.LocalDate.parse(weekEnd);
-        java.time.format.DateTimeFormatter shortDate = java.time.format.DateTimeFormatter.ofPattern("MMM d");
-        message.setText("Week of " + shortDate.format(start) + " – " + shortDate.format(end));
+        java.time.format.DateTimeFormatter shortDate = java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy");
+        message.setText((previousWeeks > 1 ? "Period: " : "Week of ") + shortDate.format(start) + " – " + shortDate.format(end));
 
         int totalMinutes = data.getInt("total_minutes");
         int approvedMinutes = data.optInt("approved_minutes", 0);
@@ -111,8 +188,11 @@ public final class TimesheetTab extends TabModule {
         String submissionStatus = data.isNull("submission_status") ? null : data.optString("submission_status", null);
         // Paul only needs to know one thing: is this week done, or still being worked on. Everything else
         // (approved/submitted/accepted/reopened/needs_correction) is office-internal plumbing.
-        boolean accepted = "accepted".equals(submissionStatus) && pendingMinutes <= 0;
-        addBadge(badgeRow, accepted ? "Accepted" : "Pending", accepted ? Theme.SUCCESS : Theme.PRIMARY, density);
+        boolean accepted = "accepted".equals(submissionStatus);
+        if (accepted) badgeRow.addView(TimeCardUi.lockedBadge(context(), "Accepted · Locked"));
+        else if (data.optInt("locked_weeks", 0) > 0)
+            badgeRow.addView(TimeCardUi.lockedBadge(context(), data.getInt("locked_weeks") + " of " + data.getInt("week_count") + " weeks locked"));
+        else addBadge(badgeRow, "Pending", Theme.PRIMARY, density);
 
         daysContainer.removeAllViews();
         JSONArray days = data.getJSONArray("days");
