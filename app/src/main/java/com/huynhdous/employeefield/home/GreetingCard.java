@@ -12,7 +12,7 @@ import com.huynhdous.employeefield.core.media.Avatars;
 import com.huynhdous.employeefield.core.session.Session;
 import com.huynhdous.employeefield.core.ui.Theme;
 
-/** The card at the top of the home screen: menu button, profile photo, "Welcome, name", sign-out button and who is signed in. */
+/** The card at the top of the home screen: a row with the menu button, profile photo and sign-out button, then "Welcome, name" and who is signed in. */
 final class GreetingCard {
     final LinearLayout view;
     private final Activity activity;
@@ -46,16 +46,21 @@ final class GreetingCard {
         headerRow.addView(avatar, avatarParams);
         refreshAvatar();
 
-        TextView nameText = new TextView(activity);
-        nameText.setText("Welcome, " + session.employeeName);
-        nameText.setTextSize(20);
-        nameText.setTextColor(Theme.TEXT_PRIMARY);
-        headerRow.addView(nameText, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        // The space between the photo and the sign-out button; the name no longer squeezes in here.
+        headerRow.addView(new android.view.View(activity), new LinearLayout.LayoutParams(0, 1, 1f));
 
         ImageButton signOutButton = Theme.iconButton(activity, R.drawable.ic_logout, Theme.NEUTRAL, "Sign out");
         headerRow.addView(signOutButton, new LinearLayout.LayoutParams(buttonSize, buttonSize));
         signOutButton.setOnClickListener(v -> signOut.run());
         view.addView(headerRow);
+
+        // "Welcome, name" sits on its own line, right above "Signed in as ...", so a long name no longer wraps beside the photo.
+        TextView nameText = new TextView(activity);
+        nameText.setText("Welcome, " + session.employeeName);
+        nameText.setTextSize(20);
+        nameText.setTextColor(Theme.TEXT_PRIMARY);
+        nameText.setPadding(0, (int) (12 * density), 0, 0);
+        view.addView(nameText);
 
         TextView signedInAs = new TextView(activity);
         signedInAs.setText("Signed in as " + session.username + ".");
