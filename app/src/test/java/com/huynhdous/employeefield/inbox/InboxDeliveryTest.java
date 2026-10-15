@@ -16,27 +16,46 @@ import static org.robolectric.Shadows.shadowOf;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=28)
 public class InboxDeliveryTest {
+    @Test public void ineligibleEmployeeCannotReceiveLocalOrServerOffers() throws Exception {
+        Activity activity=Robolectric.buildActivity(Activity.class).setup().get();
+        activity.getSharedPreferences("work_inbox_900",0).edit().clear().commit();
+        InboxActions ui=new InboxActions(activity,900);
+        LinearLayout header=new LinearLayout(activity);ui.attach(header);
+        ui.receiveWorkOffer("offer:900","Private work","Other company");
+        ui.receiveWorkOffer("test-900","Test work offer","Local test");
+        assertFalse(activity.getSharedPreferences("work_inbox_900",0).contains("items"));
+        ui.setWorkOffersEnabled(true);
+        ui.receiveWorkOffer("offer:900","Work","Own company");
+        ui.setWorkOffersEnabled(false);
+        assertEquals("Notifications, 0 unread",((android.widget.FrameLayout)header.getChildAt(1)).getChildAt(0).getContentDescription());
+        java.lang.reflect.Method show=InboxActions.class.getDeclaredMethod("show",boolean.class);
+        show.setAccessible(true);show.invoke(ui,false);
+        assertFalse(ShadowAlertDialog.getLatestAlertDialog().getButton(AlertDialog.BUTTON_NEUTRAL).getVisibility()==android.view.View.VISIBLE);
+        ui.close();
+    }
+
     @Test public void backgroundDeliveryUpdatesVisibleBadgesAndIsDeduplicated() {
         Activity activity=Robolectric.buildActivity(Activity.class).setup().get();
         activity.getSharedPreferences("work_inbox_77",0).edit().clear().commit();
-        InboxActions ui=new InboxActions(activity,77);
+        InboxActions ui=new InboxActions(activity,77);ui.setWorkOffersEnabled(true);
         LinearLayout header=new LinearLayout(activity);ui.attach(header);
         InboxActions background=new InboxActions(activity.getApplicationContext(),77);
         background.receiveWorkOffer("offer:101","Repair faucet","Fixture address");
         background.receiveWorkOffer("offer:101","Repair faucet","Duplicate delivery");
         shadowOf(android.os.Looper.getMainLooper()).idle();
         android.widget.FrameLayout button=(android.widget.FrameLayout)header.getChildAt(0);
-        assertEquals("Messages, 1 unread",button.getChildAt(0).getContentDescription());
+        assertEquals("Messages, 0 unread",button.getChildAt(0).getContentDescription());
+        assertEquals("Notifications, 1 unread",((android.widget.FrameLayout)header.getChildAt(1)).getChildAt(0).getContentDescription());
         assertEquals(1,shadowOf(activity.getSystemService(NotificationManager.class)).getAllNotifications().size());
         ui.close();
     }
     @Test public void openingRealOfferAllowsAcceptanceAndSavesReadState() throws Exception {
         Activity activity=Robolectric.buildActivity(Activity.class).setup().get();
         activity.getSharedPreferences("work_inbox_78",0).edit().clear().commit();
-        InboxActions ui=new InboxActions(activity,78);ui.attach(new LinearLayout(activity));
+        InboxActions ui=new InboxActions(activity,78);ui.setWorkOffersEnabled(true);ui.attach(new LinearLayout(activity));
         final String[] result=new String[2];ui.setAnswer((id,decision,done)->{result[0]=id;result[1]=decision;done.run();});
         ui.receiveWorkOffer("offer:102","Work offer","Fixture address");
-        java.lang.reflect.Method show=InboxActions.class.getDeclaredMethod("show",boolean.class);show.setAccessible(true);show.invoke(ui,true);
+        java.lang.reflect.Method show=InboxActions.class.getDeclaredMethod("show",boolean.class);show.setAccessible(true);show.invoke(ui,false);
         AlertDialog list=ShadowAlertDialog.getLatestAlertDialog();
         list.getListView().performItemClick(null,0,0);
         AlertDialog detail=ShadowAlertDialog.getLatestAlertDialog();

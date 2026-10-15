@@ -56,6 +56,11 @@ final class GreetingCard {
         headerRow.addView(new android.view.View(activity), new LinearLayout.LayoutParams(0, 1, 1f));
 
         inbox.attach(headerRow);
+        inbox.setWorkOffersEnabled(false);
+        try {
+            host.request("dispatch/status", new org.json.JSONObject().put("token", session.token), null,
+                    response -> inbox.setWorkOffersEnabled(response.optBoolean("dispatch_enabled", false)), true, null);
+        } catch (org.json.JSONException e) { throw new IllegalStateException(e); }
 
         ImageButton signOutButton = Theme.iconButton(activity, R.drawable.ic_logout, Theme.NEUTRAL, "Sign out");
         headerRow.addView(signOutButton, new LinearLayout.LayoutParams(buttonSize, buttonSize));

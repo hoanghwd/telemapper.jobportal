@@ -20,7 +20,6 @@ import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import com.huynhdous.employeefield.BuildConfig;
 import com.huynhdous.employeefield.R;
 import com.huynhdous.employeefield.core.ui.Theme;
 import com.huynhdous.employeefield.main;
@@ -29,7 +28,7 @@ import org.json.JSONObject;
 import java.util.Collections;
 import java.util.List;
 
-/** Message and alert buttons; delivery is supplied by the future work-offer poller. */
+/** Internal messages are reserved; eligible service work offers use notifications only. */
 public final class InboxActions {
     private static final String CHANNEL = "work_offers";
     private final Activity activity;
@@ -57,12 +56,25 @@ public final class InboxActions {
         manager.createNotificationChannel(channel);
     }
 
+    public void setWorkOffersEnabled(boolean enabled) {
+        preferences.edit().putBoolean("offers_enabled", enabled).commit();
+        if (!enabled) {
+            for (InboxState.Item item : state.items())
+                context.getSystemService(NotificationManager.class).cancel(employeeId + ":" + item.id, 1);
+        }
+        reload();
+        if (enabled) save();
+        refresh();
+    }
+
     private void reload() {
         state = new InboxState();
+        if (!preferences.getBoolean("offers_enabled", false)) return;
         try {
             JSONArray saved = new JSONArray(preferences.getString("items", "[]"));
             for (int i = 0; i < saved.length(); i++) {
                 JSONObject o = saved.getJSONObject(i);
+                if (!o.getString("id").startsWith("offer:")) continue;
                 InboxState.Item item = new InboxState.Item(o.getString("id"), o.getString("title"), o.getString("body"));
                 item.messageRead = o.optBoolean("message_read");
                 item.notificationRead = o.optBoolean("notification_read");
@@ -74,7 +86,7 @@ public final class InboxActions {
     public void close() { if (listener != null) preferences.unregisterOnSharedPreferenceChangeListener(listener); }
 
     public void attach(LinearLayout header) {
-        listener = (prefs, key) -> { if ("items".equals(key)) { reload(); refresh(); } };
+        listener = (prefs, key) -> { if ("items".equals(key) || "offers_enabled".equals(key)) { reload(); refresh(); } };
         preferences.registerOnSharedPreferenceChangeListener(listener);
         header.addView(button(true), new LinearLayout.LayoutParams(dp(48), dp(48)));
         header.addView(button(false), new LinearLayout.LayoutParams(dp(48), dp(48)));
@@ -103,6 +115,7 @@ public final class InboxActions {
 
     /** Call on the UI thread with an immutable server offer ID; retries never sound twice. */
     public void receiveWorkOffer(String id, String title, String body) {
+        if (!preferences.getBoolean("offers_enabled", false) || !id.startsWith("offer:")) return;
         synchronized (InboxActions.class) {
             reload();
             if (!state.receive(new InboxState.Item(id, title, body))) return;
@@ -121,6 +134,10 @@ public final class InboxActions {
     }
 
     private void show(boolean messages) {
+        if (messages) {
+            new AlertDialog.Builder(activity).setTitle("Messages").setMessage("No messages yet.").setPositiveButton("Close", null).show();
+            return;
+        }
         reload();
         List<InboxState.Item> items = state.items(); Collections.reverse(items);
         AlertDialog.Builder dialog = new AlertDialog.Builder(activity).setTitle(messages ? "Messages" : "Notifications").setPositiveButton("Close", null);
@@ -145,8 +162,6 @@ public final class InboxActions {
                 detail.show();
             });
         }
-        if (!messages && BuildConfig.DEBUG) dialog.setNeutralButton("Test work alert", (d, which) ->
-                receiveWorkOffer("test-" + System.currentTimeMillis(), "Test work offer", "This is a local sound and badge test, not a real assignment."));
         dialog.show();
     }
 
@@ -175,7 +190,7 @@ public final class InboxActions {
         preferences.edit().putString("items", saved.toString()).commit();
     }
     private void refresh() {
-        if (messagesBadge != null) badge(messagesBadge, messagesButton, "Messages", state.unread(true));
+        if (messagesBadge != null) badge(messagesBadge, messagesButton, "Messages", 0);
         if (alertsBadge != null) badge(alertsBadge, alertsButton, "Notifications", state.unread(false));
     }
     private void badge(TextView view, View button, String label, int count) {

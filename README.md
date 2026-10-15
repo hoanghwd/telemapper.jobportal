@@ -109,7 +109,7 @@ Real-phone camera capture, offline retry, app restart, and discard checks remain
 
 The signed-in header has message and notification icons with separate red unread counts (9+ maximum display). Opening an item marks it read in that list. Inbox entries stay in private storage per employee; tokens are not stored. Repeated delivery of the same server offer ID adds and sounds only once. Alerts use Android's New work offers channel; its sound is controlled in phone notification settings and respects notification permission and Do Not Disturb.
 
-This increment adds the inbox and receiveWorkOffer hook, not the dispatch delivery/acceptance workflow. There are no automatic test offers. In a debug build, tap the bell then Test work alert to create a clearly labeled local test item and check the sound/badges. That button is absent in release builds. Real sound, small-screen layout, permission and screen-lock checks still require a phone. Server work-offer polling integration remains the next increment.
+This increment adds the inbox and receiveWorkOffer hook, not the dispatch delivery/acceptance workflow. There are no automatic test offers. The message icon is reserved for future staff/worker communication and never lists work offers. Work-offer notifications require server-confirmed customer-request business-model eligibility. Local debug offer creation is removed; obsolete local test entries are discarded.
 
 ## Real manual work offers (0.3.2)
 

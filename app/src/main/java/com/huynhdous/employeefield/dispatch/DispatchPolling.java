@@ -49,9 +49,11 @@ public final class DispatchPolling {
             lastReady = ready; pendingUnavailable = false; retry = 15;
             interval = Math.max(5, Math.min(300, response.optInt("poll_interval_seconds", 15)));
             status = "busy".equals(response.optString("availability")) ? "Job accepted — busy" : ready ? "Ready — waiting for work" : "Unavailable for service work";
+            InboxActions inbox = new InboxActions(context, employee);
+            inbox.setWorkOffersEnabled(response.optBoolean("job_offers_enabled", false));
             JSONObject offer = response.optJSONObject("pending_offer");
             if (ready && isReady(token) && offer != null)
-                new InboxActions(context, employee).receiveWorkOffer("offer:" + offer.getString("id"), offer.getString("title"), offer.getString("body"));
+                inbox.receiveWorkOffer("offer:" + offer.getString("id"), offer.getString("title"), offer.getString("body"));
             next = clock.getAsLong() + interval * 1000L;
         } catch (Api.ApiError e) {
             if (e.code == 401 || e.code == 403) { ready(token, false); lastReady = false; pendingUnavailable = false; status = e.getMessage(); }
