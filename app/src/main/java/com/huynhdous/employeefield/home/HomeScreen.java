@@ -44,6 +44,8 @@ public final class HomeScreen {
     private GateBanner banner;
     private TextView title;
     private DoorsTab doors;
+    private com.huynhdous.employeefield.dispatch.DispatchReadyControl dispatch;
+    private com.huynhdous.employeefield.dispatch.ActiveJobControl activeJob;
 
     public HomeScreen(Activity activity, Session session, ScheduleGate gate, TabManager tabs, AppHost host, Runnable signOut) {
         this.activity = activity;
@@ -60,10 +62,16 @@ public final class HomeScreen {
         int pad = (int) (24 * density);
         LinearLayout panel = newPanel(pad);
 
-        greeting = new GreetingCard(activity, session, drawer::open, signOut);
+        greeting = new GreetingCard(activity, session, drawer::open, signOut, host, this::refreshDispatch);
         LinearLayout.LayoutParams greetingParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         greetingParams.bottomMargin = (int) (8 * density);
         panel.addView(greeting.view, greetingParams);
+
+        dispatch = new com.huynhdous.employeefield.dispatch.DispatchReadyControl(host, session);
+        panel.addView(dispatch.view, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        activeJob = new com.huynhdous.employeefield.dispatch.ActiveJobControl(host, session, () -> dispatch.check());
+        panel.addView(activeJob.view, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         title = newTitleBar(density);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -106,6 +114,14 @@ public final class HomeScreen {
     public void applyGate() {
         tabs.dimGated();
         if (banner != null) banner.update(gate, tabs.current() == Tabs.SCHEDULE);
+    }
+
+    /** Called by work-offer delivery on the UI thread. */
+    public void close() { if (greeting != null) greeting.close(); }
+    public void refreshDispatch() { if (dispatch != null) dispatch.check(); if (activeJob != null) activeJob.refresh(); }
+
+    public void receiveWorkOffer(String id, String title, String body) {
+        if (greeting != null) greeting.receiveWorkOffer(id, title, body);
     }
 
     public void avatarChanged() {

@@ -18,10 +18,16 @@ final class GreetingCard {
     private final Activity activity;
     private final Session session;
     private final ImageView avatar;
+    private final com.huynhdous.employeefield.inbox.InboxActions inbox;
 
-    GreetingCard(Activity activity, Session session, Runnable openMenu, Runnable signOut) {
+    GreetingCard(Activity activity, Session session, Runnable openMenu, Runnable signOut, com.huynhdous.employeefield.core.tab.AppHost host, Runnable dispatchChanged) {
         this.activity = activity;
         this.session = session;
+        inbox = new com.huynhdous.employeefield.inbox.InboxActions(activity, session.employeeId);
+        inbox.setAnswer((id, decision, done) -> {
+            try { host.request("dispatch/respond", new org.json.JSONObject().put("token", host.token()).put("offer_id", id).put("decision", decision), null, response -> { done.run(); dispatchChanged.run(); }); }
+            catch (org.json.JSONException e) { throw new IllegalStateException(e); }
+        });
         float density = activity.getResources().getDisplayMetrics().density;
 
         view = new LinearLayout(activity);
@@ -35,19 +41,21 @@ final class GreetingCard {
         ImageButton menuButton = Theme.iconButton(activity, R.drawable.ic_menu_hamburger, Theme.NEUTRAL, "Menu");
         int buttonSize = (int) (48 * density);
         LinearLayout.LayoutParams menuButtonParams = new LinearLayout.LayoutParams(buttonSize, buttonSize);
-        menuButtonParams.rightMargin = (int) (10 * density);
+        menuButtonParams.rightMargin = (int) (2 * density);
         headerRow.addView(menuButton, menuButtonParams);
         menuButton.setOnClickListener(v -> openMenu.run());
 
         avatar = Theme.circularAvatar(activity, 44);
         int avatarSize = (int) (44 * density);
         LinearLayout.LayoutParams avatarParams = new LinearLayout.LayoutParams(avatarSize, avatarSize);
-        avatarParams.rightMargin = (int) (12 * density);
+        avatarParams.rightMargin = (int) (2 * density);
         headerRow.addView(avatar, avatarParams);
         refreshAvatar();
 
         // The space between the photo and the sign-out button; the name no longer squeezes in here.
         headerRow.addView(new android.view.View(activity), new LinearLayout.LayoutParams(0, 1, 1f));
+
+        inbox.attach(headerRow);
 
         ImageButton signOutButton = Theme.iconButton(activity, R.drawable.ic_logout, Theme.NEUTRAL, "Sign out");
         headerRow.addView(signOutButton, new LinearLayout.LayoutParams(buttonSize, buttonSize));
@@ -68,6 +76,12 @@ final class GreetingCard {
         signedInAs.setTextColor(Theme.TEXT_SECONDARY);
         signedInAs.setPadding(0, (int) (4 * density), 0, 0);
         view.addView(signedInAs);
+    }
+
+    void close() { inbox.close(); }
+
+    void receiveWorkOffer(String id, String title, String body) {
+        inbox.receiveWorkOffer(id, title, body);
     }
 
     /** The profile photo was changed: load the new one. */

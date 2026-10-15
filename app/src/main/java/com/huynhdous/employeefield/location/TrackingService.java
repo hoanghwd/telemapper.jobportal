@@ -41,6 +41,7 @@ public final class TrackingService extends Service implements LocationListener {
     private DispositionQueue dispositionQueue;
     private ScheduledExecutorService worker;
     private PowerManager.WakeLock wakeLock;
+    private com.huynhdous.employeefield.dispatch.DispatchPolling dispatch;
     private String token, session;
     private long employee, expiresMs;
     private volatile long lastFixNanos = 0;
@@ -137,6 +138,8 @@ public final class TrackingService extends Service implements LocationListener {
                 manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, POLL_INTERVAL_MS, 0f, this, Looper.getMainLooper());
             if (manager.getAllProviders().contains(LocationManager.NETWORK_PROVIDER))
                 manager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, POLL_INTERVAL_MS, 0f, this, Looper.getMainLooper());
+            dispatch = new com.huynhdous.employeefield.dispatch.DispatchPolling(this, token, employee);
+            worker.scheduleWithFixedDelay(dispatch::tick, 0, 1, TimeUnit.SECONDS);
             worker.scheduleWithFixedDelay(this::upload, 0, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
             worker.scheduleWithFixedDelay(this::checkMealCompliance, MEAL_CHECK_INTERVAL_MS, MEAL_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
@@ -191,6 +194,7 @@ public final class TrackingService extends Service implements LocationListener {
             if (stopping) return;
             try {
                 JSONObject point = new JSONObject().put("sample_id", UUID.randomUUID().toString()).put("session_id", session).put("captured_ms", copy.getTime()).put("latitude", copy.getLatitude()).put("longitude", copy.getLongitude()).put("accuracy_m", copy.getAccuracy()).put("is_mock", copy.isFromMockProvider()).put("os_version", os).put("device_model", model).put("battery_percent", battery == null ? JSONObject.NULL : battery).put("location_permission", permission);
+                if (dispatch != null) dispatch.location(point);
                 queue.add(employee, point);
                 update("Location captured · " + queue.count(employee) + " waiting to upload");
                 upload();
@@ -313,6 +317,7 @@ public final class TrackingService extends Service implements LocationListener {
             queue.close();
             dispositionQueue.close();
         });
+        if (dispatch != null) worker.execute(dispatch::stop);
         worker.shutdown(); // Finish the in-flight upload before closing storage; queued captures observe stopping.
         stopForeground(STOP_FOREGROUND_REMOVE);
         super.onDestroy();

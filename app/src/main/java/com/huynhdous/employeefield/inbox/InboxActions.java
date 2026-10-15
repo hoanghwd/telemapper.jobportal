@@ -1,0 +1,187 @@
+package com.huynhdous.employeefield.inbox;
+
+import android.Manifest;
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Intent;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.FrameLayout;
+import android.widget.ImageButton;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import com.huynhdous.employeefield.BuildConfig;
+import com.huynhdous.employeefield.R;
+import com.huynhdous.employeefield.core.ui.Theme;
+import com.huynhdous.employeefield.main;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import java.util.Collections;
+import java.util.List;
+
+/** Message and alert buttons; delivery is supplied by the future work-offer poller. */
+public final class InboxActions {
+    private static final String CHANNEL = "work_offers";
+    private final Activity activity;
+    private final Context context;
+    private final long employeeId;
+    private final SharedPreferences preferences;
+    private InboxState state = new InboxState();
+    private SharedPreferences.OnSharedPreferenceChangeListener listener;
+    public interface Answer { void respond(String id, String decision, Runnable done); }
+    private Answer answer;
+    public void setAnswer(Answer answer) { this.answer = answer; }
+    private TextView messagesBadge, alertsBadge;
+    private View messagesButton, alertsButton;
+
+    public InboxActions(Context context, long employeeId) {
+        this.context = context;
+        this.activity = context instanceof Activity ? (Activity) context : null;
+        this.employeeId = employeeId;
+        preferences = context.getSharedPreferences("work_inbox_" + employeeId, Activity.MODE_PRIVATE);
+        reload();
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        NotificationChannel channel = new NotificationChannel(CHANNEL, "New work offers", NotificationManager.IMPORTANCE_HIGH);
+        channel.setDescription("Sound and alerts when a new work offer arrives");
+        channel.enableVibration(true);
+        manager.createNotificationChannel(channel);
+    }
+
+    private void reload() {
+        state = new InboxState();
+        try {
+            JSONArray saved = new JSONArray(preferences.getString("items", "[]"));
+            for (int i = 0; i < saved.length(); i++) {
+                JSONObject o = saved.getJSONObject(i);
+                InboxState.Item item = new InboxState.Item(o.getString("id"), o.getString("title"), o.getString("body"));
+                item.messageRead = o.optBoolean("message_read");
+                item.notificationRead = o.optBoolean("notification_read");
+                state.receive(item);
+            }
+        } catch (Exception e) { android.util.Log.w("WorkInbox", "Could not restore inbox", e); }
+    }
+
+    public void close() { if (listener != null) preferences.unregisterOnSharedPreferenceChangeListener(listener); }
+
+    public void attach(LinearLayout header) {
+        listener = (prefs, key) -> { if ("items".equals(key)) { reload(); refresh(); } };
+        preferences.registerOnSharedPreferenceChangeListener(listener);
+        header.addView(button(true), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        header.addView(button(false), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        refresh();
+    }
+
+    private View button(boolean messages) {
+        FrameLayout frame = new FrameLayout(activity);
+        ImageButton icon = Theme.iconButton(activity, messages ? R.drawable.ic_inbox_message : R.drawable.ic_inbox_bell,
+                Theme.NEUTRAL, messages ? "Messages" : "Notifications");
+        frame.addView(icon, new FrameLayout.LayoutParams(dp(48), dp(48)));
+        icon.setOnClickListener(v -> show(messages));
+        TextView badge = new TextView(activity);
+        badge.setTextColor(Color.WHITE); badge.setTextSize(10); badge.setTypeface(null, Typeface.BOLD);
+        badge.setGravity(Gravity.CENTER); badge.setPadding(dp(3), 0, dp(3), 0);
+        badge.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        GradientDrawable background = new GradientDrawable(); background.setColor(0xffd71920); background.setCornerRadius(dp(10));
+        badge.setBackground(background);
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, dp(18), Gravity.TOP | Gravity.END);
+        params.topMargin = dp(1); params.rightMargin = dp(1);
+        badge.setMinWidth(dp(18)); frame.addView(badge, params);
+        if (messages) { messagesBadge = badge; messagesButton = icon; }
+        else { alertsBadge = badge; alertsButton = icon; }
+        return frame;
+    }
+
+    /** Call on the UI thread with an immutable server offer ID; retries never sound twice. */
+    public void receiveWorkOffer(String id, String title, String body) {
+        synchronized (InboxActions.class) {
+            reload();
+            if (!state.receive(new InboxState.Item(id, title, body))) return;
+            save();
+        }
+        if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
+        NotificationManager manager = context.getSystemService(NotificationManager.class);
+        if (!manager.areNotificationsEnabled()) return;
+        Intent intent = new Intent(context, main.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent open = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        android.app.Notification notification = new android.app.Notification.Builder(context, CHANNEL)
+                .setSmallIcon(R.drawable.ic_inbox_bell).setContentTitle(title).setContentText(body)
+                .setStyle(new android.app.Notification.BigTextStyle().bigText(body))
+                .setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(true).build();
+        manager.notify(employeeId + ":" + id, 1, notification);
+    }
+
+    private void show(boolean messages) {
+        reload();
+        List<InboxState.Item> items = state.items(); Collections.reverse(items);
+        AlertDialog.Builder dialog = new AlertDialog.Builder(activity).setTitle(messages ? "Messages" : "Notifications").setPositiveButton("Close", null);
+        if (items.isEmpty()) dialog.setMessage(messages ? "No messages yet." : "No notifications yet.");
+        else {
+            String[] labels = new String[items.size()];
+            for (int i = 0; i < items.size(); i++) {
+                InboxState.Item item = items.get(i);
+                labels[i] = ((messages ? item.messageRead : item.notificationRead) ? "" : "● ") + item.title;
+            }
+            dialog.setItems(labels, (d, which) -> {
+                InboxState.Item item = items.get(which);
+                synchronized (InboxActions.class) { reload(); state.read(item.id, messages); save(); }
+                refresh();
+                context.getSystemService(NotificationManager.class).cancel(employeeId + ":" + item.id, 1);
+                AlertDialog.Builder detail = new AlertDialog.Builder(activity).setTitle(item.title).setMessage(item.body);
+                if (item.id.startsWith("offer:") && answer != null && !preferences.contains("answer_" + item.id)) {
+                    detail.setPositiveButton("Accept", (choiceDialog, whichItem) -> answer.respond(item.id.substring(6), "accepted", () -> answered(item.id, "Accepted")));
+                    detail.setNegativeButton("Decline", (choiceDialog, whichItem) -> answer.respond(item.id.substring(6), "declined", () -> answered(item.id, "Declined")));
+                    detail.setNeutralButton("Close", null);
+                } else detail.setPositiveButton("Close", null);
+                detail.show();
+            });
+        }
+        if (!messages && BuildConfig.DEBUG) dialog.setNeutralButton("Test work alert", (d, which) ->
+                receiveWorkOffer("test-" + System.currentTimeMillis(), "Test work offer", "This is a local sound and badge test, not a real assignment."));
+        dialog.show();
+    }
+
+    /** Remove work alerts when the signed-in session ends; retain GPS service notifications. */
+    public static void dismissAlerts(Activity activity) {
+        NotificationManager manager = activity.getSystemService(NotificationManager.class);
+        for (android.service.notification.StatusBarNotification alert : manager.getActiveNotifications()) {
+            if (CHANNEL.equals(alert.getNotification().getChannelId())) manager.cancel(alert.getTag(), alert.getId());
+        }
+    }
+
+    private void answered(String id, String status) {
+        preferences.edit().putString("answer_" + id, status).apply();
+        new AlertDialog.Builder(activity).setMessage("Work offer " + status.toLowerCase(java.util.Locale.ROOT) + ".").setPositiveButton("OK", null).show();
+    }
+
+    // Commit before sounding so a repeated background delivery cannot notify twice.
+    @android.annotation.SuppressLint("ApplySharedPref")
+    private void save() {
+        JSONArray saved = new JSONArray();
+        for (InboxState.Item item : state.items()) {
+            try { saved.put(new JSONObject().put("id", item.id).put("title", item.title).put("body", item.body)
+                    .put("message_read", item.messageRead).put("notification_read", item.notificationRead)); }
+            catch (Exception e) { throw new IllegalStateException("Could not save inbox", e); }
+        }
+        preferences.edit().putString("items", saved.toString()).commit();
+    }
+    private void refresh() {
+        if (messagesBadge != null) badge(messagesBadge, messagesButton, "Messages", state.unread(true));
+        if (alertsBadge != null) badge(alertsBadge, alertsButton, "Notifications", state.unread(false));
+    }
+    private void badge(TextView view, View button, String label, int count) {
+        view.setVisibility(count == 0 ? View.GONE : View.VISIBLE);
+        view.setText(count > 9 ? "9+" : Integer.toString(count));
+        button.setContentDescription(label + ", " + count + " unread");
+    }
+    private int dp(int value) { return Math.round(value * activity.getResources().getDisplayMetrics().density); }
+}

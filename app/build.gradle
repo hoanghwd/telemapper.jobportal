@@ -51,8 +51,8 @@ android {
         applicationId 'com.huynhdous.employeefield'
         minSdk 26
         targetSdk 35
-        versionCode 3
-        versionName '0.3.0'
+        versionCode 6
+        versionName '0.3.3'
         buildConfigField "String", "API_BASE_URL", cfgString('api.base_url')
         buildConfigField "String", "MAP_TILE_URL", cfgString('map.tile_url')
         buildConfigField "String", "MAP_ATTRIBUTION", cfgString('map.attribution')

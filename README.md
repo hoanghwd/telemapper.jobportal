@@ -104,3 +104,15 @@ Reopening the app restores the waiting check-in without an activity-state Bundle
 Starting another arrival offers to continue or explicitly discard the saved check-in. Discard and successful completion
 delete owned draft files, while rotation preserves upload inputs. Tokens are never stored with drafts.
 Real-phone camera capture, offline retry, app restart, and discard checks remain required.
+
+## Work inbox icons (0.3.1)
+
+The signed-in header has message and notification icons with separate red unread counts (9+ maximum display). Opening an item marks it read in that list. Inbox entries stay in private storage per employee; tokens are not stored. Repeated delivery of the same server offer ID adds and sounds only once. Alerts use Android's New work offers channel; its sound is controlled in phone notification settings and respects notification permission and Do Not Disturb.
+
+This increment adds the inbox and receiveWorkOffer hook, not the dispatch delivery/acceptance workflow. There are no automatic test offers. In a debug build, tap the bell then Test work alert to create a clearly labeled local test item and check the sound/badges. That button is absent in release builds. Real sound, small-screen layout, permission and screen-lock checks still require a phone. Server work-offer polling integration remains the next increment.
+
+## Real manual work offers (0.3.2)
+
+JobPortal now has Telemapper → Daily Activity → Service Dispatch for an office with an active customer-request business model. Authorized owners/admins/managers select a worker/service model, enter the job title/address/notes, and send an offer. Android shows Ready for service work only when dispatch/status confirms eligibility. Tap Ready after GPS tracking has started; the existing foreground service polls approximately every 15 seconds (server configurable), including while the screen is locked if Android keeps that service running. A real offer sounds once and appears once in Messages and Notifications. Open it and choose Accept or Decline, then refresh JobPortal to see the answer. Manager cancellation releases an offered or accepted job for another test.
+
+New Horizon currently has prospecting-only models. Add a customer-request service model explicitly before testing service offers there; existing sales models remain active. Ineligible accounts see no Ready control and cannot use the dispatch APIs. GPS is optional for this manual test; automatic nearest-worker dispatch is not implemented. Arrival/completion, customer intake/notifications and ETA are later increments. No production work offers are created automatically by installation or testing scripts.

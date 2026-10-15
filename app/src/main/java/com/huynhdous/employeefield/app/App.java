@@ -85,11 +85,13 @@ public final class App implements AppHost, Requester.Listener {
     }
 
     private void showSignIn(boolean discardRecovery) {
+        com.huynhdous.employeefield.inbox.InboxActions.dismissAlerts(activity);
         tabs.detachAll(discardRecovery);
         if (discardRecovery) {
             firstTab = Tabs.SCHEDULE;
             restoredEmployeeId = 0;
         }
+        if (home != null) home.close();
         home = null;
         session.clear();
         auth.showSignIn();
@@ -107,6 +109,7 @@ public final class App implements AppHost, Requester.Listener {
             return;
         }
         tabs.resume();
+        if (home != null) home.refreshDispatch();
     }
 
     public void pause() {
@@ -152,6 +155,7 @@ public final class App implements AppHost, Requester.Listener {
     }
 
     public void destroy() {
+        if (home != null) home.close();
         tabs.detachAll();
         signOut.close();
     }
