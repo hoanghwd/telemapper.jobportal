@@ -188,6 +188,11 @@ public final class App implements AppHost, Requester.Listener {
     }
 
     @Override
+    public boolean timeTracking() {
+        return session.timeTracking;
+    }
+
+    @Override
     public String employeeName() {
         return session.employeeName;
     }
@@ -240,5 +245,10 @@ public final class App implements AppHost, Requester.Listener {
     @Override
     public void avatarChanged() {
         if (home != null) home.avatarChanged();
+    }
+
+    @Override
+    public void refreshDispatch() {
+        if (home != null) home.refreshDispatch();
     }
 }

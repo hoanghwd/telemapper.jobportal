@@ -42,6 +42,11 @@ public abstract class TabModule {
         return true;
     }
 
+    /** The same, also knowing whether the worker keeps a time sheet (a screen about hours overrides this). Default: {@link #isAvailableFor(String)}. */
+    public boolean isAvailableFor(String programCode, boolean timeTracking) {
+        return isAvailableFor(programCode);
+    }
+
     /** Whether the weekly-schedule gate turns this screen off (dims it and swallows touches) while the week is unconfirmed. Default yes. */
     public boolean isGated() {
         return true;

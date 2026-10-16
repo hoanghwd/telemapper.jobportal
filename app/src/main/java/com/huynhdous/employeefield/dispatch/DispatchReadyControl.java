@@ -17,7 +17,7 @@ public final class DispatchReadyControl {
     private String busyLabel = "";
     public DispatchReadyControl(AppHost host, Session session) {
         this.host = host; this.session = session;
-        view = Theme.filledButton(host.activity(), "Ready for service work", Theme.PRIMARY);
+        view = Theme.filledButton(host.activity(), "Ready to accept new orders", Theme.PRIMARY);
         view.setVisibility(View.GONE);
         view.setOnClickListener(v -> {
             if (!session.token.equals(TrackingService.activeToken)) {
@@ -41,6 +41,6 @@ public final class DispatchReadyControl {
         }, true, null); } catch (Exception e) { view.setVisibility(View.GONE); }
     }
     private void refreshLabel() {
-        view.setText(!busyLabel.isEmpty() ? busyLabel : DispatchPolling.isReady(session.token) ? "Ready for service work — tap to go unavailable" : "Ready for service work");
+        view.setText(!busyLabel.isEmpty() ? busyLabel : DispatchPolling.isReady(session.token) ? "Ready to accept new orders — tap to go unavailable" : "Ready to accept new orders");
     }
 }

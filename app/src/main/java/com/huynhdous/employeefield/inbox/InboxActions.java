@@ -25,7 +25,6 @@ import com.huynhdous.employeefield.core.ui.Theme;
 import com.huynhdous.employeefield.main;
 import org.json.JSONArray;
 import org.json.JSONObject;
-import java.util.Collections;
 import java.util.List;
 
 /** Internal messages are reserved; eligible service work offers use notifications only. */
@@ -86,10 +85,12 @@ public final class InboxActions {
     public void close() { if (listener != null) preferences.unregisterOnSharedPreferenceChangeListener(listener); }
 
     public void attach(LinearLayout header) {
-        listener = (prefs, key) -> { if ("items".equals(key) || "offers_enabled".equals(key)) { reload(); refresh(); } };
+        listener = (prefs, key) -> { if ("items".equals(key) || "offers_enabled".equals(key) || "pending_offer".equals(key) || (key != null && key.startsWith("answer_"))) { reload(); refresh(); } };
         preferences.registerOnSharedPreferenceChangeListener(listener);
         header.addView(button(true), new LinearLayout.LayoutParams(dp(48), dp(48)));
-        header.addView(button(false), new LinearLayout.LayoutParams(dp(48), dp(48)));
+        LinearLayout.LayoutParams alertsParams = new LinearLayout.LayoutParams(dp(48), dp(48));
+        alertsParams.leftMargin = dp(8); // a gap so the round buttons do not touch
+        header.addView(button(false), alertsParams);
         refresh();
     }
 
@@ -112,6 +113,9 @@ public final class InboxActions {
         else { alertsBadge = badge; alertsButton = icon; }
         return frame;
     }
+
+    /** The one offer the server says is open right now ("offer:ID"), or "" when there is none. Set on every poll, so a stale entry cannot be accepted. */
+    public void setPendingOffer(String id) { preferences.edit().putString("pending_offer", id).apply(); }
 
     /** Call on the UI thread with an immutable server offer ID; retries never sound twice. */
     public void receiveWorkOffer(String id, String title, String body) {
@@ -139,9 +143,10 @@ public final class InboxActions {
             return;
         }
         reload();
-        List<InboxState.Item> items = state.items(); Collections.reverse(items);
+        // Only the offer that is open right now is listed; the ones that were answered, expired or withdrawn are not kept on screen.
+        List<InboxState.Item> items = openOffers();
         AlertDialog.Builder dialog = new AlertDialog.Builder(activity).setTitle(messages ? "Messages" : "Notifications").setPositiveButton("Close", null);
-        if (items.isEmpty()) dialog.setMessage(messages ? "No messages yet." : "No notifications yet.");
+        if (items.isEmpty()) dialog.setMessage(messages ? "No messages yet." : "No open offers right now.");
         else {
             String[] labels = new String[items.size()];
             for (int i = 0; i < items.size(); i++) {
@@ -153,13 +158,21 @@ public final class InboxActions {
                 synchronized (InboxActions.class) { reload(); state.read(item.id, messages); save(); }
                 refresh();
                 context.getSystemService(NotificationManager.class).cancel(employeeId + ":" + item.id, 1);
-                AlertDialog.Builder detail = new AlertDialog.Builder(activity).setTitle(item.title).setMessage(item.body);
-                if (item.id.startsWith("offer:") && answer != null && !preferences.contains("answer_" + item.id)) {
+                // Only the one offer the server still has open can be answered; older entries are history and say what became of them.
+                boolean isOffer = item.id.startsWith("offer:");
+                boolean open = isOffer && answer != null && !preferences.contains("answer_" + item.id) && item.id.equals(preferences.getString("pending_offer", ""));
+                String saved = preferences.getString("answer_" + item.id, "");
+                String note = !isOffer || open ? "" : "\n\n" + (saved.isEmpty() ? "This offer is no longer open." : "You " + saved.toLowerCase(java.util.Locale.ROOT) + " this offer.");
+                AlertDialog.Builder detail = new AlertDialog.Builder(activity).setTitle(item.title).setMessage(item.body + note);
+                if (open) {
                     detail.setPositiveButton("Accept", (choiceDialog, whichItem) -> answer.respond(item.id.substring(6), "accepted", () -> answered(item.id, "Accepted")));
                     detail.setNegativeButton("Decline", (choiceDialog, whichItem) -> answer.respond(item.id.substring(6), "declined", () -> answered(item.id, "Declined")));
                     detail.setNeutralButton("Close", null);
                 } else detail.setPositiveButton("Close", null);
-                detail.show();
+                AlertDialog shown = detail.show();
+                // Open the lines up a little: the order number, addresses, distance and ETA read as separate items.
+                TextView text = shown.findViewById(android.R.id.message);
+                if (text != null) text.setLineSpacing(dp(7), 1f);
             });
         }
         dialog.show();
@@ -189,9 +202,19 @@ public final class InboxActions {
         }
         preferences.edit().putString("items", saved.toString()).commit();
     }
+    /** The offers the server says are open and that he has not answered: at most the one in {@code pending_offer}. */
+    private List<InboxState.Item> openOffers() {
+        String open = preferences.getString("pending_offer", "");
+        List<InboxState.Item> found = new java.util.ArrayList<>();
+        for (InboxState.Item item : state.items())
+            if (item.id.equals(open) && !preferences.contains("answer_" + item.id)) found.add(item);
+        return found;
+    }
     private void refresh() {
+        int unread = 0;
+        for (InboxState.Item item : openOffers()) if (!item.notificationRead) unread++;
         if (messagesBadge != null) badge(messagesBadge, messagesButton, "Messages", 0);
-        if (alertsBadge != null) badge(alertsBadge, alertsButton, "Notifications", state.unread(false));
+        if (alertsBadge != null) badge(alertsBadge, alertsButton, "Notifications", unread);
     }
     private void badge(TextView view, View button, String label, int count) {
         view.setVisibility(count == 0 ? View.GONE : View.VISIBLE);

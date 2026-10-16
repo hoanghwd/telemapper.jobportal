@@ -45,6 +45,11 @@ public interface AppHost {
      */
     void request(String action, JSONObject body, Button button, Result result, boolean independentRead, ProblemHandler onProblem);
 
+    /** Whether this worker keeps a time sheet; false when the work is paid per job, so the time sheet and hours are hidden. */
+    default boolean timeTracking() {
+        return true;
+    }
+
     /** The weekly-schedule gate shared by every screen (see {@link ScheduleGate}). */
     ScheduleGate gate();
 
@@ -70,6 +75,10 @@ public interface AppHost {
 
     /** The employee's profile photo changed: refresh the copy shown in the greeting at the top. */
     void avatarChanged();
+
+    /** The employee's work changed on the server (a job taken from the Jobs map): reload the Ready control, the orders box and the Schedule. */
+    default void refreshDispatch() {
+    }
 
     interface Result {
         void accept(JSONObject value) throws Exception;

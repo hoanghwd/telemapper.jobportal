@@ -145,7 +145,10 @@ public final class Requester {
                 if (problem != null) {
                     if (status == 401 || status == 403) listener.sessionExpired();
                     if (onProblem != null && onProblem.handle(status, problem)) return;
-                    new Popup.Builder(activity).setTitle("Employee sign-in").setMessage(problem).setPositiveButton("OK", null).show();
+                    // Only sign-in requests are about signing in; a work offer problem or any other failure gets a title that fits it.
+                    boolean signIn = "login".equals(action) || "me".equals(action) || "change-password".equals(action);
+                    String title = signIn ? "Employee sign-in" : action != null && action.startsWith("dispatch/") ? "Work offer" : "Unable to complete";
+                    new Popup.Builder(activity).setTitle(title).setMessage(problem).setPositiveButton("OK", null).show();
                     return;
                 }
                 try {

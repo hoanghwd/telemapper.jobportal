@@ -48,6 +48,12 @@ public final class TimesheetTab extends TabModule {
         return "Time Sheet";
     }
 
+    /** Work paid per job (a delivery service) has no time sheet. */
+    @Override
+    public boolean isAvailableFor(String programCode, boolean timeTracking) {
+        return timeTracking;
+    }
+
     @Override
     public int iconRes() {
         return R.drawable.ic_tab_timesheet;

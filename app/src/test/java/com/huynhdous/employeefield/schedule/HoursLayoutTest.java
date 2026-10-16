@@ -44,6 +44,7 @@ public class HoursLayoutTest {
                 case "activity":return activity;
                 case "token":return "fixture";
                 case "gate":return gate;
+                case "timeTracking":return true;
                 case "request":if(a[0].equals("timeclock/day"))((AppHost.Result)a[3]).accept(new JSONObject().put("events",events()));return null;
                 default:return null;
             }

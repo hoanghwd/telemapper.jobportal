@@ -52,6 +52,7 @@ public final class DispatchPolling {
             InboxActions inbox = new InboxActions(context, employee);
             inbox.setWorkOffersEnabled(response.optBoolean("job_offers_enabled", false));
             JSONObject offer = response.optJSONObject("pending_offer");
+            inbox.setPendingOffer(offer != null ? "offer:" + offer.getString("id") : "");
             if (ready && isReady(token) && offer != null)
                 inbox.receiveWorkOffer("offer:" + offer.getString("id"), offer.getString("title"), offer.getString("body"));
             next = clock.getAsLong() + interval * 1000L;

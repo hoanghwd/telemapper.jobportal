@@ -30,7 +30,7 @@ import com.huynhdous.employeefield.trip.TripTab;
  */
 public final class HomeScreen {
     /** The menu, top to bottom. A tab only appears for the kinds of employee it is meant for (see {@code TabModule.isAvailableFor}). */
-    private static final int[] MENU_ORDER = {Tabs.PROFILE, Tabs.SCHEDULE, Tabs.TRIP, Tabs.TIMESHEET, Tabs.EVENTS, Tabs.DOORS, Tabs.PROGRAMS, Tabs.CHECK_IN};
+    private static final int[] MENU_ORDER = {Tabs.PROFILE, Tabs.SCHEDULE, Tabs.JOBS, Tabs.TRIP, Tabs.TIMESHEET, Tabs.EVENTS, Tabs.DOORS, Tabs.PROGRAMS, Tabs.CHECK_IN};
 
     private final Activity activity;
     private final Session session;
@@ -46,6 +46,7 @@ public final class HomeScreen {
     private DoorsTab doors;
     private com.huynhdous.employeefield.dispatch.DispatchReadyControl dispatch;
     private com.huynhdous.employeefield.dispatch.ActiveJobControl activeJob;
+    private ScheduleTab scheduleTab;
 
     public HomeScreen(Activity activity, Session session, ScheduleGate gate, TabManager tabs, AppHost host, Runnable signOut) {
         this.activity = activity;
@@ -70,7 +71,8 @@ public final class HomeScreen {
         dispatch = new com.huynhdous.employeefield.dispatch.DispatchReadyControl(host, session);
         panel.addView(dispatch.view, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        activeJob = new com.huynhdous.employeefield.dispatch.ActiveJobControl(host, session, () -> dispatch.check());
+        // A job accepted, advanced or cancelled changes the Schedule's day box too, so that reloads as well.
+        activeJob = new com.huynhdous.employeefield.dispatch.ActiveJobControl(host, session, () -> { dispatch.check(); if (scheduleTab != null) scheduleTab.onResume(); });
         panel.addView(activeJob.view, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         title = newTitleBar(density);
@@ -92,8 +94,10 @@ public final class HomeScreen {
         tabs.setAfterMenuPick(drawer::close);
 
         ScheduleTab schedule = new ScheduleTab();
+        scheduleTab = schedule;
         doors = new DoorsTab();
         tabs.mount(Tabs.SCHEDULE, schedule, panel, pad);
+        tabs.mount(Tabs.JOBS, new com.huynhdous.employeefield.jobs.JobsTab(), panel, pad);
         tabs.mount(Tabs.TRIP, new TripTab(), panel, pad);
         tabs.mount(Tabs.TIMESHEET, new TimesheetTab(), panel, pad);
         tabs.mount(Tabs.PROFILE, new ProfileTab(), panel, pad);
@@ -118,7 +122,7 @@ public final class HomeScreen {
 
     /** Called by work-offer delivery on the UI thread. */
     public void close() { if (greeting != null) greeting.close(); }
-    public void refreshDispatch() { if (dispatch != null) dispatch.check(); if (activeJob != null) activeJob.refresh(); }
+    public void refreshDispatch() { if (dispatch != null) dispatch.check(); if (activeJob != null) activeJob.refresh(); if (scheduleTab != null) scheduleTab.onResume(); }
 
     public void receiveWorkOffer(String id, String title, String body) {
         if (greeting != null) greeting.receiveWorkOffer(id, title, body);

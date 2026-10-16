@@ -193,7 +193,7 @@ final class HoursCard {
         boolean stillWorking = "work".equals(state) && segStart != null;
         if (stillWorking) workMinutes += java.time.Duration.between(segStart, java.time.Instant.now()).toMinutes();
 
-        card.setVisibility(View.VISIBLE);
+        if (host.timeTracking()) card.setVisibility(View.VISIBLE);   // a worker paid per job has no hours to show
         dayGauge.centerText.setText(String.format(java.util.Locale.US, "%dh %02dm", workMinutes / 60, workMinutes % 60));
         dayGauge.subText.setText(formatHoursShort(todayScheduledMinutes));
         setProgress(dayGauge,workMinutes / (float) todayScheduledMinutes,stillWorking?Theme.PRIMARY:Theme.SUCCESS);

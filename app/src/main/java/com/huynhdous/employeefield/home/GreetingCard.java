@@ -41,7 +41,7 @@ final class GreetingCard {
         ImageButton menuButton = Theme.iconButton(activity, R.drawable.ic_menu_hamburger, Theme.NEUTRAL, "Menu");
         int buttonSize = (int) (48 * density);
         LinearLayout.LayoutParams menuButtonParams = new LinearLayout.LayoutParams(buttonSize, buttonSize);
-        menuButtonParams.rightMargin = (int) (2 * density);
+        menuButtonParams.rightMargin = (int) (8 * density);
         headerRow.addView(menuButton, menuButtonParams);
         menuButton.setOnClickListener(v -> openMenu.run());
 
@@ -63,7 +63,9 @@ final class GreetingCard {
         } catch (org.json.JSONException e) { throw new IllegalStateException(e); }
 
         ImageButton signOutButton = Theme.iconButton(activity, R.drawable.ic_logout, Theme.NEUTRAL, "Sign out");
-        headerRow.addView(signOutButton, new LinearLayout.LayoutParams(buttonSize, buttonSize));
+        LinearLayout.LayoutParams signOutParams = new LinearLayout.LayoutParams(buttonSize, buttonSize);
+        signOutParams.leftMargin = (int) (8 * density); // a gap so the round buttons do not touch
+        headerRow.addView(signOutButton, signOutParams);
         signOutButton.setOnClickListener(v -> signOut.run());
         view.addView(headerRow);
 

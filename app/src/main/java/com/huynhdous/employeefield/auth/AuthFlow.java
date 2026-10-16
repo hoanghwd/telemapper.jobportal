@@ -38,6 +38,7 @@ public final class AuthFlow implements AuthHost {
             session.employeeId = r.getLong("employee_id");
             session.expiresMs = java.time.Instant.parse(r.getString("expires_utc").replace(' ', 'T') + "Z").toEpochMilli();
             session.programCode = r.isNull("program_code") ? null : r.optString("program_code", null);
+            session.timeTracking = r.optBoolean("time_tracking", true);   // an older server sends nothing: keep the time sheet
             session.employeeName = r.getString("employee_name");
             session.username = r.getString("username");
             TrackingNotice.confirm(activity, session.employeeId, onReady, signOut::begin);

@@ -138,14 +138,14 @@ public final class TabManager {
         List<View> rows = new ArrayList<>();
         for (int slot : slots) {
             Mounted m = mounted.get(slot);
-            if (m != null && m.module.isAvailableFor(programCode)) rows.add(m.label);
+            if (m != null && m.module.isAvailableFor(programCode, host.timeTracking())) rows.add(m.label);
         }
         return rows;
     }
 
     public void select(int index) {
         Mounted requested = mounted.get(index);
-        if (requested == null || !requested.module.isAvailableFor(host.programCode())) index = Tabs.SCHEDULE;
+        if (requested == null || !requested.module.isAvailableFor(host.programCode(), host.timeTracking())) index = Tabs.SCHEDULE;
         current = index;
         for (Map.Entry<Integer, Mounted> e : mounted.entrySet()) {
             e.getValue().content.setVisibility(e.getKey() == index ? View.VISIBLE : View.GONE);

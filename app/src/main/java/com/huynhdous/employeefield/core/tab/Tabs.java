@@ -13,4 +13,5 @@ public final class Tabs {
     public static final int EVENTS = 6;
     public static final int CHECK_IN = 7;
     public static final int PROGRAMS = 8;
+    public static final int JOBS = 9;       // delivery jobs the driver can pick from a map
 }

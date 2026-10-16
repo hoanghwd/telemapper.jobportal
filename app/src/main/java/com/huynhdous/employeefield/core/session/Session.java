@@ -9,6 +9,8 @@ public final class Session {
     public long expiresMs;
     /** "D2D" or "S2S" as set by the office; may be null. */
     public String programCode;
+    /** Whether this worker keeps a time sheet. False for work paid per job (a delivery service): the Time Sheet and the hours are then not shown. */
+    public boolean timeTracking = true;
     public String employeeName = "";
     public String username = "";
 
@@ -18,6 +20,7 @@ public final class Session {
         employeeId = 0;
         expiresMs = 0;
         programCode = null;
+        timeTracking = true;
         employeeName = "";
         username = "";
     }

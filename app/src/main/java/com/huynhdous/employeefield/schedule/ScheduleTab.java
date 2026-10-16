@@ -80,6 +80,7 @@ public final class ScheduleTab extends TabModule {
         periodButton.setOnClickListener(v -> com.huynhdous.employeefield.core.ui.WeekPeriodPicker.show(context(), previousWeeks, this::selectPeriod));
         LinearLayout.LayoutParams periodParams = new LinearLayout.LayoutParams(0,TimeCardUi.dp(context(),48),1f);
         periodParams.rightMargin=TimeCardUi.dp(context(),10); controls.addView(periodButton,periodParams); controls.addView(refresh);
+        if (!host().timeTracking()) periodButton.setVisibility(View.GONE);   // looking back over past weeks is about hours
         controls.setPadding(0,0,0,TimeCardUi.dp(context(),12)); content.addView(controls);
         loadStatus = TimeCardUi.text(context(), "", 12, Theme.TEXT_SECONDARY, false);
         content.addView(loadStatus);
@@ -144,10 +145,15 @@ public final class ScheduleTab extends TabModule {
     public void refreshGate() {
         try {
             host().request("schedule", new JSONObject().put("token", host().token()), null, r ->
-                    host().gate().set(r.getJSONArray("assignments").length() > 0 && !isConfirmed(r), r.optString("week_start", null)), true, null);
+                    host().gate().set(needsConfirmation(r), r.optString("week_start", null)), true, null);
         } catch (Exception ignored) {
             // offline or unreachable: keep whatever was last known rather than locking someone out of the field
         }
+    }
+
+    /** The week has shifts and is not confirmed yet. A worker paid per job (no time sheet) never has a schedule to confirm, so nothing is ever locked. */
+    private boolean needsConfirmation(JSONObject data) throws Exception {
+        return host().timeTracking() && data.getJSONArray("assignments").length() > 0 && !isConfirmed(data);
     }
 
     private static boolean isConfirmed(JSONObject data) {
@@ -158,6 +164,7 @@ public final class ScheduleTab extends TabModule {
     private void load() {
         if (scheduleContainer == null) return;
         int requestGeneration = ++generation;
+        if (!host().timeTracking()) previousWeeks = 0;   // no hours to look back at when the work is paid per job
         int weeks = previousWeeks;
         scheduleContainer.removeAllViews();
         accountingNotice.setVisibility(View.GONE);
@@ -166,8 +173,11 @@ public final class ScheduleTab extends TabModule {
         loadStatus.setText("Loading " + periodLabel().toLowerCase(java.util.Locale.US) + "…");
         requestRead("schedule", null, requestGeneration, current -> {
             // Only the current week's schedule may change the app's confirmation gate.
-            host().gate().set(current.getJSONArray("assignments").length() > 0 && !isConfirmed(current), current.getString("week_start"));
-            if (weeks == 0) {
+            host().gate().set(needsConfirmation(current), current.getString("week_start"));
+            if (weeks == 0 && !host().timeTracking()) {
+                current.put("accounting_locked", false);   // no time sheet, so nothing to lock or total
+                render(current);
+            } else if (weeks == 0) {
                 requestRead("timesheet/week", current.getString("week_start"), requestGeneration, sheet -> {
                     current.put("accounting_locked", "accepted".equals(sheet.optString("submission_status")));
                     showAccountingNotice(java.util.Collections.singletonList(current));
@@ -265,11 +275,18 @@ public final class ScheduleTab extends TabModule {
         JSONArray assignments = data.getJSONArray("assignments");
         // decided BEFORE the day buttons are built, so they start out turned off if the week is not confirmed yet
         host().gate().clearDimmedColumns();
-        if (previousWeeks == 0) host().gate().setState(assignments.length() > 0 && !isConfirmed(data), scheduleWeekStart);
+        if (previousWeeks == 0) host().gate().setState(needsConfirmation(data), scheduleWeekStart);
         java.util.Map<String, java.util.List<JSONObject>> byDate = new java.util.LinkedHashMap<>();
         for (int i = 0; i < assignments.length(); i++) {
             JSONObject a = assignments.getJSONObject(i);
             byDate.computeIfAbsent(a.getString("work_date"), k -> new java.util.ArrayList<>()).add(a);
+        }
+        // Jobs the worker accepted through dispatch (deliveries, service calls) sit on the day they were accepted, next to any scheduled shifts.
+        java.util.Map<String, java.util.List<JSONObject>> jobsByDate = new java.util.HashMap<>();
+        JSONArray dispatchJobs = data.optJSONArray("dispatch_jobs");
+        for (int i = 0; dispatchJobs != null && i < dispatchJobs.length(); i++) {
+            JSONObject job = dispatchJobs.getJSONObject(i);
+            jobsByDate.computeIfAbsent(job.getString("work_date"), k -> new java.util.ArrayList<>()).add(job);
         }
         float density = density();
 
@@ -309,11 +326,18 @@ public final class ScheduleTab extends TabModule {
             }
 
             java.util.List<JSONObject> rows = byDate.get(dateKey);
-            if (rows == null || rows.isEmpty()) {
+            java.util.List<JSONObject> jobs = jobsByDate.getOrDefault(dateKey, java.util.Collections.emptyList());
+            if ((rows == null || rows.isEmpty()) && jobs.isEmpty()) {
                 addRow(DAY_CODES[date.getDayOfWeek().getValue() - 1], 0xfff3f4f6, 0xff9ca3af, "No assignments", null, density, dayCard);
                 if (previousWeeks == 0) continue;
                 rows = java.util.Collections.emptyList();
+            } else if (rows == null) {
+                rows = java.util.Collections.emptyList();
             }
+            // A day with accepted jobs shows them (and, below, its time clock) even though nothing was scheduled.
+            for (JSONObject job : jobs)
+                addRow(DAY_CODES[date.getDayOfWeek().getValue() - 1], isToday ? Theme.PRIMARY : 0xffe5e7eb, isToday ? 0xffffffff : Theme.NEUTRAL,
+                        job.optString("title", "Job"), jobStatusText(job, zone), density, dayCard);
             for (JSONObject a : rows) {
                 String startTime = a.getString("start_time"), endTime = a.getString("end_time");
                 addRow(DAY_CODES[date.getDayOfWeek().getValue() - 1], isToday ? Theme.PRIMARY : 0xffe5e7eb, isToday ? 0xffffffff : Theme.NEUTRAL,
@@ -323,7 +347,7 @@ public final class ScheduleTab extends TabModule {
                 weekMinutesScheduled += shiftMinutes;
                 if (isToday) todayMinutesScheduled += shiftMinutes;
             }
-            if (date.isAfter(today)) continue;
+            if (date.isAfter(today) || !host().timeTracking()) continue;   // no time clock for a worker paid per job
             LinearLayout timeClockContainer = host().gate().newDimmedColumn(context());
             timeClockContainer.setOrientation(LinearLayout.VERTICAL);
             dayCard.addView(timeClockContainer);
@@ -353,7 +377,10 @@ public final class ScheduleTab extends TabModule {
             host().gate().notifyChanged(); return;
         }
 
-        if (isConfirmed(data)) {
+        if (!host().timeTracking()) {   // paid per job: there is no weekly schedule to confirm
+            confirmStatus.setVisibility(View.GONE);
+            confirmButton.setVisibility(View.GONE);
+        } else if (isConfirmed(data)) {
             String confirmedUtc = data.optString("confirmed_utc", "");
             java.time.Instant instant = java.time.Instant.parse(confirmedUtc.replace(' ', 'T') + "Z");
             String local = java.time.format.DateTimeFormatter.ofPattern("MMM d, h:mm a").withZone(java.time.ZoneId.systemDefault()).format(instant);
@@ -389,6 +416,21 @@ public final class ScheduleTab extends TabModule {
             });
         } catch (Exception ignored) {
         }
+    }
+
+    /** "On the way 8:30 PM": the job's status and the time of its latest stage, in the office's time zone. */
+    static String jobStatusText(JSONObject job, java.time.ZoneId zone) {
+        String status = job.optString("status_label", "Accepted");
+        // A cancelled job shows when it was cancelled (the server stores that in accepted_utc), not when he had gone on the way.
+        String[] fields = "declined".equals(job.optString("status")) ? new String[]{"accepted_utc"} : new String[]{"completed_utc", "started_utc", "arrived_utc", "on_the_way_utc", "accepted_utc"};
+        for (String field : fields) {
+            if (job.isNull(field)) continue;
+            try {
+                java.time.LocalTime time = java.time.LocalDateTime.parse(job.getString(field).replace(' ', 'T')).atZone(java.time.ZoneOffset.UTC).withZoneSameInstant(zone).toLocalTime();
+                return status + " " + time.format(java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.US));
+            } catch (Exception e) { return status; }
+        }
+        return status;
     }
 
     private static int shiftMinutes(JSONObject a) throws Exception {

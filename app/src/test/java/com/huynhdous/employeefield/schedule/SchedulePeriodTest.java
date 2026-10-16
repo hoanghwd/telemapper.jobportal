@@ -20,12 +20,14 @@ import static org.junit.Assert.*;
 public class SchedulePeriodTest {
     private final List<Object[]> requests = new ArrayList<>();
     private final ScheduleGate gate = new ScheduleGate();
+    private boolean timeTracking = true;
     private ScheduleTab tab() {
         Activity activity = Robolectric.buildActivity(Activity.class).setup().get();
         AppHost host = (AppHost)Proxy.newProxyInstance(AppHost.class.getClassLoader(),new Class[]{AppHost.class},(p,m,args)-> {
             if (m.getName().equals("activity")) return activity;
             if (m.getName().equals("token")) return "fixture";
             if (m.getName().equals("gate")) return gate;
+            if (m.getName().equals("timeTracking")) return timeTracking;
             if (m.getName().equals("request")) requests.add(args);
             return null;
         });
@@ -53,6 +55,22 @@ public class SchedulePeriodTest {
         assertEquals(View.GONE,((View)field(tab,"confirmButton")).getVisibility());
         // Current week's confirmation state must survive reading confirmed historical weeks.
         assertTrue(gate.isLocked()); assertEquals("2026-01-05", gate.week());
+    }
+    @Test public void aWorkerPaidPerJobHasNoHoursNoTimeClockAndNoTimeSheetRequests() throws Exception {
+        timeTracking=false;
+        ScheduleTab tab=tab();select(tab,2);   // even a remembered "last 2 weeks" choice is ignored
+        assertEquals(1,requests.size());assertEquals("schedule",requests.get(0)[0]);
+        reply(0,schedule("2026-01-05",false));
+        assertEquals("only the schedule is read: no time sheet totals and no time clock for any day",1,requests.size());
+        assertEquals(View.GONE,((HoursCard)field(tab,"hoursCard")).view().getVisibility());
+        assertEquals(View.GONE,((View)field(tab,"periodSummary")).getVisibility());
+        assertEquals(View.GONE,((View)field(tab,"periodButton")).getVisibility());
+        assertFalse("a worker paid per job is never locked by an unconfirmed schedule",gate.isLocked());assertEquals(View.GONE,((View)field(tab,"confirmButton")).getVisibility());
+    }
+    @Test public void aWorkerWithATimeSheetStillGetsHerHoursAndClock() throws Exception {
+        ScheduleTab tab=tab();select(tab,0);
+        reply(0,schedule("2026-01-05",false));
+        assertEquals("timesheet/week",requests.get(1)[0]);
     }
     @Test public void combinedSixDayWeeksDoNotAddExcludedSundays() throws Exception {
         JSONObject data=SchedulePeriod.combine(Arrays.asList(schedule("2025-12-22",true),schedule("2025-12-29",true)));

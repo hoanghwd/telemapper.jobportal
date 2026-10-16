@@ -40,6 +40,7 @@ public class InboxDeliveryTest {
         InboxActions ui=new InboxActions(activity,77);ui.setWorkOffersEnabled(true);
         LinearLayout header=new LinearLayout(activity);ui.attach(header);
         InboxActions background=new InboxActions(activity.getApplicationContext(),77);
+        background.setPendingOffer("offer:101");
         background.receiveWorkOffer("offer:101","Repair faucet","Fixture address");
         background.receiveWorkOffer("offer:101","Repair faucet","Duplicate delivery");
         shadowOf(android.os.Looper.getMainLooper()).idle();
@@ -54,6 +55,7 @@ public class InboxDeliveryTest {
         activity.getSharedPreferences("work_inbox_78",0).edit().clear().commit();
         InboxActions ui=new InboxActions(activity,78);ui.setWorkOffersEnabled(true);ui.attach(new LinearLayout(activity));
         final String[] result=new String[2];ui.setAnswer((id,decision,done)->{result[0]=id;result[1]=decision;done.run();});
+        ui.setPendingOffer("offer:102"); // the poll says this offer is the open one
         ui.receiveWorkOffer("offer:102","Work offer","Fixture address");
         java.lang.reflect.Method show=InboxActions.class.getDeclaredMethod("show",boolean.class);show.setAccessible(true);show.invoke(ui,false);
         AlertDialog list=ShadowAlertDialog.getLatestAlertDialog();
@@ -64,6 +66,36 @@ public class InboxDeliveryTest {
         shadowOf(android.os.Looper.getMainLooper()).idle();
         assertEquals("102",result[0]);assertEquals("accepted",result[1]);
         assertTrue(activity.getSharedPreferences("work_inbox_78",0).contains("answer_offer:102"));
+        ui.close();
+    }
+    @Test public void anOfferThatIsNoLongerOpenCannotBeAnswered() throws Exception {
+        Activity activity=Robolectric.buildActivity(Activity.class).setup().get();
+        activity.getSharedPreferences("work_inbox_81",0).edit().clear().commit();
+        InboxActions ui=new InboxActions(activity,81);ui.setWorkOffersEnabled(true);ui.attach(new LinearLayout(activity));
+        ui.setAnswer((id,decision,done)->{throw new AssertionError("A closed offer must not be answered");});
+        ui.setPendingOffer("offer:104");
+        ui.receiveWorkOffer("offer:104","Work offer","Fixture address");
+        ui.setPendingOffer("");
+        java.lang.reflect.Method show=InboxActions.class.getDeclaredMethod("show",boolean.class);show.setAccessible(true);show.invoke(ui,false);
+        AlertDialog list=ShadowAlertDialog.getLatestAlertDialog();
+        assertEquals(0,list.getListView()==null?0:list.getListView().getCount());
+        assertEquals("No open offers right now.",shadowOf(list).getMessage().toString());
+        ui.close();
+    }
+    @Test public void onlyTheOpenOfferIsListedAndCounted() throws Exception {
+        Activity activity=Robolectric.buildActivity(Activity.class).setup().get();
+        activity.getSharedPreferences("work_inbox_82",0).edit().clear().commit();
+        InboxActions ui=new InboxActions(activity,82);ui.setWorkOffersEnabled(true);
+        LinearLayout header=new LinearLayout(activity);ui.attach(header);
+        for(String id:new String[]{"offer:201","offer:202","offer:203"}){ui.setPendingOffer(id);ui.receiveWorkOffer(id,"Order "+id,"Body");}
+        ui.setPendingOffer("offer:203"); // the poll says only 203 is still open
+        assertEquals("Notifications, 1 unread",((android.widget.FrameLayout)header.getChildAt(1)).getChildAt(0).getContentDescription());
+        java.lang.reflect.Method show=InboxActions.class.getDeclaredMethod("show",boolean.class);show.setAccessible(true);show.invoke(ui,false);
+        AlertDialog list=ShadowAlertDialog.getLatestAlertDialog();
+        assertEquals(1,list.getListView().getCount());
+        assertTrue(list.getListView().getAdapter().getItem(0).toString().contains("offer:203"));
+        ui.setPendingOffer("");
+        assertEquals("Notifications, 0 unread",((android.widget.FrameLayout)header.getChildAt(1)).getChildAt(0).getContentDescription());
         ui.close();
     }
     @Test public void employeeStorageDoesNotLeakOffersBetweenAccounts() {
