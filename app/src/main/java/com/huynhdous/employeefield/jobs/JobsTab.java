@@ -21,7 +21,7 @@ import org.json.JSONObject;
  * whether this is on and how far from him a job may be (Office Settings > Logistics); the server checks every rule again when he takes one.
  */
 public final class JobsTab extends TabModule {
-    private static final int MAP_HEIGHT_DP = 320;
+    private static final int MAP_HEIGHT_DP = 480;
 
     private TextView status;
     private WebView mapView;
@@ -66,6 +66,7 @@ public final class JobsTab extends TabModule {
         mapView = new WebView(context());
         mapView.getSettings().setJavaScriptEnabled(true);
         mapView.setWebViewClient(new WebViewClient());
+        com.huynhdous.employeefield.trip.TripMap.protectGestures(mapView);
         // Only ever loaded with our own bundled HTML/JS via loadDataWithBaseURL, never remote content, so exposing a JS interface is safe.
         mapView.addJavascriptInterface(new JobsMap.Bridge(host(), mapView, this::load, this::takeFromMap), "AndroidBridge");
         card.addView(mapView, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (int) (MAP_HEIGHT_DP * density)));

@@ -39,14 +39,14 @@ public class JobTextTest {
 
     @Test
     public void whatTheDriverEarnsIsShownOnlyWhenTheServerWorkedItOut() {
-        assertEquals("You earn $1.33", JobText.earnLine("1.33"));
+        assertEquals("Pay: $1.33", JobText.earnLine("1.33"));
         assertEquals("", JobText.earnLine(""));
         assertEquals("", JobText.earnLine(null));
         assertEquals("", JobText.earnLine("null"));   // a JSON null read as text
         String withPay = JobText.confirmMessage("A", "B", 1.0, 4, 2.0, 7, "1.33", false, 0, 0);
-        assertEquals("Pick up: A\nDrop off: B\n1.0 mi · 4 min to the pickup · trip 2.0 mi · 7 min\nYou earn $1.33", withPay);
+        assertEquals("Pick up: A\nDrop off: B\n1.0 mi · 4 min to the pickup · trip 2.0 mi · 7 min\nPay: $1.33", withPay);
         String busyWithPay = JobText.confirmMessage("A", "B", 1.0, 4, 2.0, 7, "0.99", true, 0.5, 3);
-        assertEquals("Pick up: A\nDrop off: B\n1.0 mi · 4 min to the pickup · trip 2.0 mi · 7 min\nYou earn $0.99\nAdds about 0.5 mi · 3 min to your route", busyWithPay);
+        assertEquals("Pick up: A\nDrop off: B\n1.0 mi · 4 min to the pickup · trip 2.0 mi · 7 min\nPay: $0.99\nAdds about 0.5 mi · 3 min to your route", busyWithPay);
     }
 
     @Test

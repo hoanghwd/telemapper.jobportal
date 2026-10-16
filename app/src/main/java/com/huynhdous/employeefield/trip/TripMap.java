@@ -30,6 +30,20 @@ public final class TripMap {
     /** The look of every map page in the app (the toolbar, the status line, the map filling the rest); the Jobs map adds its own pins to it. */
     public static final String PAGE_CSS = "html,body{height:100%;margin:0;font:14px sans-serif}body{display:flex;flex-direction:column}#map{flex:1;min-height:200px}.toolbar{padding:8px;display:flex;gap:8px}.toolbar button{display:flex;align-items:center;justify-content:center;width:48px;height:44px;padding:0}.toolbar button:disabled{opacity:.35}button{padding:8px;border:1px solid #2563eb;border-radius:5px;background:white;color:#2563eb}.toolbar svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.start-icon span{display:block;background:#2563eb;color:white;border:3px solid white;border-radius:50%;width:32px;height:32px;text-align:center;line-height:32px;box-shadow:0 1px 5px #555}.leaflet-overlay-pane canvas,.leaflet-overlay-pane svg{max-width:none!important;max-height:none!important}#status{padding:4px 8px;font-size:12px}";
 
+    /** A map drag/pinch belongs to Leaflet until the finger is lifted; scrolling elsewhere still belongs to the screen. */
+    public static void protectGestures(android.webkit.WebView map) {
+        map.setOnTouchListener((view, event) -> {
+            if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP) view.performClick();
+            android.view.ViewParent parent = view.getParent();
+            if (parent != null) {
+                int action = event.getActionMasked();
+                parent.requestDisallowInterceptTouchEvent(
+                        action != android.view.MotionEvent.ACTION_UP
+                        && action != android.view.MotionEvent.ACTION_CANCEL);
+            }
+            return false; // WebView/Leaflet still handles panning, zooming and popup taps.
+        });
+    }
     /** The HTML for the map page. The map script itself is bundled (assets/leaflet/trip-map.js); the tile server comes from the app settings. */
     public static String buildHtml(org.json.JSONArray points, org.json.JSONArray scheduled, org.json.JSONArray dispositions) {
         return "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"

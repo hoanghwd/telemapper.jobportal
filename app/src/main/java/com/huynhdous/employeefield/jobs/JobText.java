@@ -38,9 +38,9 @@ final class JobText {
         return holding ? text + "\n" + extraLine(extraMiles, extraMinutes) : text;
     }
 
-    /** "You earn $1.33" from the pay the server worked out ("1.33"); empty when the job has none (an order without a quoted fee). */
+    /** "Pay: $1.33" from the pay the server worked out ("1.33"); empty when the job has none (an order without a quoted fee). */
     static String earnLine(String pay) {
-        return pay == null || pay.isEmpty() || "null".equals(pay) ? "" : "You earn $" + pay;
+        return pay == null || pay.isEmpty() || "null".equals(pay) ? "" : "Pay: $" + pay;
     }
 
     /** The line above the map: what is there to take, or why nothing is. */

@@ -205,7 +205,7 @@ public final class DoorsTab extends TabModule {
         doorsMapView = new android.webkit.WebView(activity);
         doorsMapView.getSettings().setJavaScriptEnabled(true);
         doorsMapView.setWebViewClient(new android.webkit.WebViewClient());
-        protectMapGestures(doorsMapView);
+        TripMap.protectGestures(doorsMapView);
         doorsMapView.addJavascriptInterface(new TripMap.PreviewBridge(host, doorsMapView, () -> loadDoors(), () -> routes.previewRoute()), "AndroidBridge");
         LinearLayout.LayoutParams doorsMapParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (int) (MAP_HEIGHT_DP * density));
         doorsMapCard.addView(doorsMapView, doorsMapParams);
@@ -528,19 +528,5 @@ public final class DoorsTab extends TabModule {
         return m + "m " + String.format(java.util.Locale.US, "%02d", s) + "s";
     }
 
-    /** Keep map drags and pinch gestures inside the WebView, not its parent ScrollView. */
-    private void protectMapGestures(android.webkit.WebView map) {
-        map.setOnTouchListener((view, event) -> {
-            if (event.getActionMasked() == android.view.MotionEvent.ACTION_UP) view.performClick();
-            android.view.ViewParent parent = view.getParent();
-            if (parent != null) {
-                int action = event.getActionMasked();
-                parent.requestDisallowInterceptTouchEvent(
-                        action != android.view.MotionEvent.ACTION_UP
-                        && action != android.view.MotionEvent.ACTION_CANCEL);
-            }
-            return false; // WebView/Leaflet still receives and handles the gesture.
-        });
-    }
 
 }

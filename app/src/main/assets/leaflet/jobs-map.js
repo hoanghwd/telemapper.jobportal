@@ -54,7 +54,7 @@
             line(box, 'div', 'Drop off: ' + job.dropoff_address);
             const mins = n => Number(n) > 0 ? ' · ' + Number(n) + ' min' : '';
             line(box, 'div', fmt(job.miles_to_pickup) + ' mi' + mins(job.minutes_to_pickup) + ' to the pickup · trip ' + fmt(job.trip_miles) + ' mi' + mins(job.trip_minutes), 'margin-top:4px;color:#475569');
-            if (job.pay !== null && job.pay !== undefined && job.pay !== '') line(box, 'div', 'You earn $' + job.pay, 'margin-top:4px;font-weight:700;color:#15803d');
+            if (job.pay !== null && job.pay !== undefined && job.pay !== '') line(box, 'div', 'Pay: $' + job.pay, 'margin-top:4px;font-weight:700;color:#15803d');
             if (data.holding > 0) line(box, 'div', 'Adds about ' + fmt(job.extra_miles) + ' mi · ' + job.extra_minutes + ' min to your route', 'color:#475569');
             if (data.can_take && typeof bridge.takeJob === 'function') {
                 const take = line(box, 'button', 'Take this job', 'margin-top:8px;width:100%;padding:10px;border:0;border-radius:6px;background:#2563eb;color:#fff;font-weight:600');

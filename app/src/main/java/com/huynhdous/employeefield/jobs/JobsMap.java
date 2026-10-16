@@ -22,7 +22,7 @@ final class JobsMap {
     static String buildHtml(JSONObject available) {
         return "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">"
                 + "<link rel=\"stylesheet\" href=\"leaflet.css\"><style>" + TripMap.PAGE_CSS
-                + ".stop-icon span{display:block;color:#fff;border:3px solid #fff;border-radius:50%;width:30px;height:30px;text-align:center;line-height:24px;font-weight:700;box-shadow:0 1px 5px #555}.pin-icon svg{display:block;filter:drop-shadow(0 1px 3px #555)}"
+                + "html,body{overflow:hidden;overscroll-behavior:none}#map{touch-action:none;overscroll-behavior:contain}.stop-icon span{display:block;color:#fff;border:3px solid #fff;border-radius:50%;width:30px;height:30px;text-align:center;line-height:24px;font-weight:700;box-shadow:0 1px 5px #555}.pin-icon svg{display:block;filter:drop-shadow(0 1px 3px #555)}"
                 + "</style></head><body><div class=\"toolbar\">" + TripMap.TOOLBAR_BUTTONS + "</div><div id=\"status\"></div><div id=\"map\"></div>"
                 + "<script src=\"leaflet.js\"></script><script>" + Config.mapSettingsScript()
                 + "var jobsData=" + available.toString().replace("<", "\\u003c") + ";</script><script src=\"jobs-map.js\"></script></body></html>";
