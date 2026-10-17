@@ -74,7 +74,7 @@ public final class InboxActions {
             for (int i = 0; i < saved.length(); i++) {
                 JSONObject o = saved.getJSONObject(i);
                 if (!o.getString("id").startsWith("offer:")) continue;
-                InboxState.Item item = new InboxState.Item(o.getString("id"), o.getString("title"), o.getString("body"));
+                InboxState.Item item = new InboxState.Item(o.getString("id"), o.getString("title"), o.getString("body"), o.optString("map", ""));
                 item.messageRead = o.optBoolean("message_read");
                 item.notificationRead = o.optBoolean("notification_read");
                 state.receive(item);
@@ -118,11 +118,18 @@ public final class InboxActions {
     public void setPendingOffer(String id) { preferences.edit().putString("pending_offer", id).apply(); }
 
     /** Call on the UI thread with an immutable server offer ID; retries never sound twice. */
-    public void receiveWorkOffer(String id, String title, String body) {
+    public void receiveWorkOffer(String id, String title, String body) { receiveWorkOffer(id,title,body,""); }
+    public void receiveWorkOffer(String id, String title, String body, String mapJson) {
         if (!preferences.getBoolean("offers_enabled", false) || !id.startsWith("offer:")) return;
         synchronized (InboxActions.class) {
             reload();
-            if (!state.receive(new InboxState.Item(id, title, body))) return;
+            if (!state.receive(new InboxState.Item(id, title, body, mapJson))) {
+                // Enrich an old cached offer silently; polling the same ID never rings again.
+                for(InboxState.Item item:state.items()) if(item.id.equals(id) && !mapJson.isEmpty() && !mapJson.equals(item.mapJson)) {
+                    item.mapJson=mapJson;save();break;
+                }
+                return;
+            }
             save();
         }
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
@@ -130,10 +137,21 @@ public final class InboxActions {
         if (!manager.areNotificationsEnabled()) return;
         Intent intent = new Intent(context, main.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent open = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        android.app.Notification notification = new android.app.Notification.Builder(context, CHANNEL)
-                .setSmallIcon(R.drawable.ic_inbox_bell).setContentTitle(title).setContentText(body)
-                .setStyle(new android.app.Notification.BigTextStyle().bigText(body))
-                .setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(true).build();
+        String preview = new InboxState.Item(id, title, body).deliveryPreview();
+        String summary = preview.isEmpty() ? body : preview;
+        android.app.Notification.Builder builder = new android.app.Notification.Builder(context, CHANNEL)
+                .setSmallIcon(R.drawable.ic_inbox_bell).setContentTitle(title).setContentText(summary)
+                .setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(true);
+        if (preview.isEmpty()) builder.setStyle(new android.app.Notification.BigTextStyle().bigText(body));
+        else {
+            // Keep all the same offer fields together in the ringing banner and expanded notification.
+            android.widget.RemoteViews content = new android.widget.RemoteViews(context.getPackageName(), R.layout.notification_work_offer);
+            content.setTextViewText(R.id.notification_offer_title, title);
+            content.setTextViewText(R.id.notification_offer_summary, summary);
+            builder.setStyle(new android.app.Notification.DecoratedCustomViewStyle())
+                    .setCustomHeadsUpContentView(content).setCustomBigContentView(content);
+        }
+        android.app.Notification notification = builder.build();
         manager.notify(employeeId + ":" + id, 1, notification);
     }
 
@@ -148,10 +166,16 @@ public final class InboxActions {
         AlertDialog.Builder dialog = new AlertDialog.Builder(activity).setTitle(messages ? "Messages" : "Notifications").setPositiveButton("Close", null);
         if (items.isEmpty()) dialog.setMessage(messages ? "No messages yet." : "No open offers right now.");
         else {
-            String[] labels = new String[items.size()];
+            CharSequence[] labels = new CharSequence[items.size()];
             for (int i = 0; i < items.size(); i++) {
                 InboxState.Item item = items.get(i);
-                labels[i] = ((messages ? item.messageRead : item.notificationRead) ? "" : "● ") + item.title;
+                String heading = (item.notificationRead ? "" : "● ") + item.title;
+                String preview = item.deliveryPreview();
+                android.text.SpannableString label = new android.text.SpannableString(
+                        heading + (preview.isEmpty() ? "" : "\n" + preview));
+                label.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), 0, heading.length(),
+                        android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                labels[i] = label;
             }
             dialog.setItems(labels, (d, which) -> {
                 InboxState.Item item = items.get(which);
@@ -164,12 +188,25 @@ public final class InboxActions {
                 String saved = preferences.getString("answer_" + item.id, "");
                 String note = !isOffer || open ? "" : "\n\n" + (saved.isEmpty() ? "This offer is no longer open." : "You " + saved.toLowerCase(java.util.Locale.ROOT) + " this offer.");
                 AlertDialog.Builder detail = new AlertDialog.Builder(activity).setTitle(item.title).setMessage(item.body + note);
+                android.webkit.WebView offerMap=OfferMap.create(activity,item.mapJson);
+                if(offerMap!=null) {
+                    android.widget.ScrollView scroll=new android.widget.ScrollView(activity);
+                    LinearLayout content=new LinearLayout(activity);content.setOrientation(LinearLayout.VERTICAL);
+                    content.setPadding(dp(24),dp(8),dp(24),dp(8));
+                    TextView description=new TextView(activity);description.setText(item.body+note);
+                    description.setTextSize(17);description.setTextColor(Theme.TEXT_PRIMARY);description.setLineSpacing(dp(7),1f);
+                    content.addView(description);
+                    LinearLayout.LayoutParams mapParams=new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,dp(180));
+                    mapParams.topMargin=dp(12);content.addView(offerMap,mapParams);scroll.addView(content);
+                    detail.setMessage(null).setView(scroll);
+                }
                 if (open) {
                     detail.setPositiveButton("Accept", (choiceDialog, whichItem) -> answer.respond(item.id.substring(6), "accepted", () -> answered(item.id, "Accepted")));
                     detail.setNegativeButton("Decline", (choiceDialog, whichItem) -> answer.respond(item.id.substring(6), "declined", () -> answered(item.id, "Declined")));
                     detail.setNeutralButton("Close", null);
                 } else detail.setPositiveButton("Close", null);
                 AlertDialog shown = detail.show();
+                if(offerMap!=null) shown.setOnDismissListener(dismissed->{offerMap.stopLoading();offerMap.destroy();});
                 // Open the lines up a little: the order number, addresses, distance and ETA read as separate items.
                 TextView text = shown.findViewById(android.R.id.message);
                 if (text != null) text.setLineSpacing(dp(7), 1f);
@@ -196,7 +233,7 @@ public final class InboxActions {
     private void save() {
         JSONArray saved = new JSONArray();
         for (InboxState.Item item : state.items()) {
-            try { saved.put(new JSONObject().put("id", item.id).put("title", item.title).put("body", item.body)
+            try { saved.put(new JSONObject().put("id", item.id).put("title", item.title).put("body", item.body).put("map", item.mapJson)
                     .put("message_read", item.messageRead).put("notification_read", item.notificationRead)); }
             catch (Exception e) { throw new IllegalStateException("Could not save inbox", e); }
         }

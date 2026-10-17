@@ -16,6 +16,33 @@ import static org.robolectric.Shadows.shadowOf;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk=28)
 public class InboxDeliveryTest {
+    @Test public void notificationListPreviewsDeliveryAndStillOpensFullOffer() throws Exception {
+        Activity activity=Robolectric.buildActivity(Activity.class).setup().get();
+        activity.getSharedPreferences("work_inbox_83",0).edit().clear().commit();
+        InboxActions ui=new InboxActions(activity,83);ui.setWorkOffersEnabled(true);ui.attach(new LinearLayout(activity));
+        ui.setAnswer((id,decision,done)->{});ui.setPendingOffer("offer:301");
+        String body="Pick up: Bakery address\nDrop off: Customer address\nTotal distance: 1.5 mi\nETA: about 6 min\nOffer Amount: $4.46";
+        ui.receiveWorkOffer("offer:301","TP202610170085",body);
+        android.app.Notification ringing=shadowOf(activity.getSystemService(NotificationManager.class)).getAllNotifications().get(0);
+        String expected="Drop-off: Customer address\nDistance: 1.5 mi\nOffer: $4.46";
+        assertEquals(expected,ringing.extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString());
+        assertNotNull(ringing.headsUpContentView);assertNotNull(ringing.bigContentView);
+        android.view.View banner=ringing.headsUpContentView.apply(activity,new LinearLayout(activity));
+        assertEquals("TP202610170085",((android.widget.TextView)banner.findViewById(com.huynhdous.employeefield.R.id.notification_offer_title)).getText().toString());
+        assertEquals(expected,((android.widget.TextView)banner.findViewById(com.huynhdous.employeefield.R.id.notification_offer_summary)).getText().toString());
+        java.lang.reflect.Method show=InboxActions.class.getDeclaredMethod("show",boolean.class);show.setAccessible(true);show.invoke(ui,false);
+        AlertDialog list=ShadowAlertDialog.getLatestAlertDialog();
+        CharSequence label=(CharSequence)list.getListView().getAdapter().getItem(0);
+        assertEquals("● TP202610170085\nDrop-off: Customer address\nDistance: 1.5 mi\nOffer: $4.46",label.toString());
+        android.widget.TextView row=(android.widget.TextView)list.getListView().getAdapter().getView(0,null,list.getListView());
+        assertEquals(label.toString(),row.getText().toString());assertTrue(row.getMaxLines()>=4);
+        list.getListView().performItemClick(null,0,0);
+        AlertDialog detail=ShadowAlertDialog.getLatestAlertDialog();
+        assertEquals(body,shadowOf(detail).getMessage().toString());
+        assertEquals("Accept",detail.getButton(AlertDialog.BUTTON_POSITIVE).getText().toString());
+        ui.close();
+    }
+
     @Test public void ineligibleEmployeeCannotReceiveLocalOrServerOffers() throws Exception {
         Activity activity=Robolectric.buildActivity(Activity.class).setup().get();
         activity.getSharedPreferences("work_inbox_900",0).edit().clear().commit();

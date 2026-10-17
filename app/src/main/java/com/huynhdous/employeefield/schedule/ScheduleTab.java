@@ -330,7 +330,7 @@ public final class ScheduleTab extends TabModule {
             java.util.List<JSONObject> jobs = jobsByDate.getOrDefault(dateKey, java.util.Collections.emptyList());
             if ((rows == null || rows.isEmpty()) && jobs.isEmpty()) {
                 addRow(DAY_CODES[date.getDayOfWeek().getValue() - 1], 0xfff3f4f6, 0xff9ca3af, "No assignments", null, density, dayCard);
-                if (previousWeeks == 0) continue;
+                if (previousWeeks == 0) { addDailyEarnings(dayCard, jobs); continue; }
                 rows = java.util.Collections.emptyList();
             } else if (rows == null) {
                 rows = java.util.Collections.emptyList();
@@ -341,7 +341,7 @@ public final class ScheduleTab extends TabModule {
             for (int n = 0; n < newestFirst.size(); n++) {
                 JSONObject job = newestFirst.get(n);
                 LinearLayout jobRow = addRow(String.valueOf(n + 1), isToday ? Theme.PRIMARY : 0xffe5e7eb, isToday ? 0xffffffff : Theme.NEUTRAL,
-                        job.optString("title", "Job"), jobStatusText(job, zone), density, dayCard);
+                        job.optBoolean("delivery") ? orderNumber(job.optString("title", "Job")) : job.optString("title", "Job"), jobSummaryText(job, zone), density, dayCard);
                 final java.time.ZoneId jobZone = zone;
                 jobRow.setClickable(true);
                 jobRow.setOnClickListener(v -> new Popup.Builder(context()).setTitle(orderNumber(job.optString("title", "Job")))
@@ -356,7 +356,7 @@ public final class ScheduleTab extends TabModule {
                 weekMinutesScheduled += shiftMinutes;
                 if (isToday) todayMinutesScheduled += shiftMinutes;
             }
-            if (date.isAfter(today) || !host().timeTracking()) continue;   // no time clock for a worker paid per job
+            if (date.isAfter(today) || !host().timeTracking()) { addDailyEarnings(dayCard, jobs); continue; }   // no time clock for a worker paid per job
             LinearLayout timeClockContainer = host().gate().newDimmedColumn(context());
             timeClockContainer.setOrientation(LinearLayout.VERTICAL);
             dayCard.addView(timeClockContainer);
@@ -378,6 +378,7 @@ public final class ScheduleTab extends TabModule {
             JSONObject lockedDays = data.optJSONObject("locked_days");
             clock.setAccountingLocked(lockedDays == null ? data.optBoolean("accounting_locked") : lockedDays.optBoolean(dateKey));
             dayClocks.add(clock);
+            addDailyEarnings(dayCard, jobs);
         }
         if (previousWeeks == 0) hoursCard.setScheduled(todayMinutesScheduled, weekMinutesScheduled);
         loadDayClocks(dayClocks, 0, generation);
@@ -489,6 +490,23 @@ public final class ScheduleTab extends TabModule {
     }
 
     /** "On the way 8:30 PM": the job's status and the time of its latest stage, in the office's time zone. */
+    /** A delivery's destination and latest status, with recorded driver earnings only when completed. */
+    static String jobSummaryText(JSONObject job, java.time.ZoneId zone) {
+        String status = jobStatusText(job, zone);
+        if (!job.optBoolean("delivery")) return status;
+        String address = "", pay = "";
+        for (String line : job.optString("details", "").split("\r?\n")) {
+            String trimmed = line.trim();
+            if (address.isEmpty() && trimmed.startsWith("Drop off:"))
+                address = trimmed.substring("Drop off:".length()).trim();
+            if (pay.isEmpty() && trimmed.startsWith("Offer Amount: $"))
+                pay = trimmed.substring("Offer Amount: ".length()).trim();
+        }
+        String summary = "Drop-off: " + (address.isEmpty() ? "unavailable" : address) + "\n" + status;
+        if ("completed".equals(job.optString("status")) && !pay.isEmpty()) summary += "\nEarned: " + pay;
+        return summary;
+    }
+
     static String jobStatusText(JSONObject job, java.time.ZoneId zone) {
         String status = job.optString("status_label", "Accepted");
         // A cancelled job shows when it was cancelled (the server stores that in accepted_utc), not when he had gone on the way.
@@ -501,6 +519,45 @@ public final class ScheduleTab extends TabModule {
             } catch (Exception e) { return status; }
         }
         return status;
+    }
+
+    /** Recorded driver pay from the existing offer details, in cents; absent pay is unknown. */
+    static Long recordedDriverPay(JSONObject job) {
+        for (String line : job.optString("details", "").split("\r?\n")) {
+            String trimmed=line.trim();
+            if (!trimmed.startsWith("Offer Amount: $")) continue;
+            try {
+                long cents=new java.math.BigDecimal(trimmed.substring("Offer Amount: $".length()).replace(",", "")).movePointRight(2).longValueExact();
+                return cents>=0?cents:null;
+            } catch (NumberFormatException | ArithmeticException e) { return null; }
+        }
+        return null;
+    }
+
+    static String dailyEarningsText(java.util.List<JSONObject> jobs) {
+        long total=0;int missing=0;
+        for(JSONObject job:jobs) {
+            if(!job.optBoolean("delivery") || !"completed".equals(job.optString("status"))) continue;
+            Long cents=recordedDriverPay(job);
+            if(cents==null) missing++; else total+=cents;
+        }
+        if(total<=0) return "";
+        if(missing>0) return "Total earned: $"+java.math.BigDecimal.valueOf(total,2).toPlainString()+" (partial)\n"+
+                "Earnings unavailable for "+missing+(missing==1?" delivery.":" deliveries.");
+        return "Total earned: $"+java.math.BigDecimal.valueOf(total,2).toPlainString();
+    }
+
+    private void addDailyEarnings(LinearLayout dayCard, java.util.List<JSONObject> jobs) {
+        String summary=dailyEarningsText(jobs);
+        if(summary.isEmpty()) return;
+        View divider=new View(context());divider.setBackgroundColor(Theme.OUTLINE);
+        LinearLayout.LayoutParams dividerParams=new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,TimeCardUi.dp(context(),1));
+        dividerParams.setMargins(0,TimeCardUi.dp(context(),12),0,TimeCardUi.dp(context(),10));
+        dayCard.addView(divider,dividerParams);
+        TextView earned=new TextView(context());earned.setText(summary);
+        earned.setTextSize(14);earned.setTextColor(Theme.SUCCESS);
+        earned.setTypeface(earned.getTypeface(),android.graphics.Typeface.BOLD);
+        dayCard.addView(earned,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT));
     }
 
     private static int shiftMinutes(JSONObject a) throws Exception {

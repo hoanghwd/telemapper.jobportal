@@ -9,11 +9,31 @@ import java.util.Map;
 public final class InboxState {
     public static final class Item {
         public final String id, title, body;
+        public String mapJson;
         public boolean messageRead, notificationRead;
-        public Item(String id, String title, String body) {
+        /** Brief delivery preview using the exact route and driver pay already in the offer. */
+        public String deliveryPreview() {
+            StringBuilder preview = new StringBuilder();
+            String[][] fields = {{"Drop off:", "Drop-off:"}, {"Total distance:", "Distance:"}, {"Offer Amount:", "Offer:"}};
+            for (String[] field : fields) {
+                for (String line : body.split("\r?\n")) {
+                    String trimmed = line.trim();
+                    if (!trimmed.startsWith(field[0])) continue;
+                    String value = trimmed.substring(field[0].length()).trim();
+                    if (!value.isEmpty()) {
+                        if (preview.length() > 0) preview.append('\n');
+                        preview.append(field[1]).append(' ').append(value);
+                    }
+                    break;
+                }
+            }
+            return preview.toString();
+        }
+        public Item(String id, String title, String body) { this(id,title,body,""); }
+        public Item(String id, String title, String body, String mapJson) {
             if (id == null || id.trim().isEmpty() || title == null || body == null)
                 throw new IllegalArgumentException("A work offer needs an ID, title and body.");
-            this.id = id; this.title = title; this.body = body;
+            this.id = id; this.title = title; this.body = body; this.mapJson = mapJson == null ? "" : mapJson;
         }
     }
     private final Map<String, Item> items = new LinkedHashMap<>();

@@ -2,6 +2,12 @@ package com.huynhdous.employeefield.inbox;
 import org.junit.Test;
 import static org.junit.Assert.*;
 public class InboxStateTest {
+    @Test public void previewPreservesRoadEstimateAndOnlyIncludesAvailableFields() {
+        InboxState.Item item=new InboxState.Item("offer:1","Order","Drop off: Final address\r\nTotal distance: 2 mi (straight-line estimate)\r\nETA: unavailable");
+        assertEquals("Drop-off: Final address\nDistance: 2 mi (straight-line estimate)",item.deliveryPreview());
+        assertEquals("",new InboxState.Item("offer:2","Service job","Fix a faucet").deliveryPreview());
+        assertEquals("Offer: $0.00",new InboxState.Item("offer:3","Order","Offer Amount: $0.00").deliveryPreview());
+    }
     @Test public void repeatedOfferProducesOneUnreadMessageAndAlert() {
         InboxState state = new InboxState();
         assertTrue(state.receive(new InboxState.Item("offer-1", "Plumbing", "New request")));

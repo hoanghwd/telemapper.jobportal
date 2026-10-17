@@ -99,8 +99,42 @@ public class ActiveJobControlTest {
         assertTrue(shown.contains("Current delivery request"));assertFalse(shown.contains("Suggested route"));
         assertEquals(1,withLabel(control,"Refresh").size());assertEquals(1,withLabel(control,"On the way").size());
     }
+    @Test public void deliveryDepartureSkipsArrivalAndSendsPickedUpStage()throws Exception {
+        ActiveJobControl control=control();reply(0,new JSONObject().put("dispatch_enabled",true).put("active_job",job("on_the_way").put("delivery",true)));
+        assertNull(button(control,"At pickup"));assertNull(button(control,"Picked up"));
+        button(control,"On Delivery").performClick();
+        assertEquals("started",((JSONObject)requests.get(1)[1]).getString("stage"));
+        reply(1,new JSONObject().put("job",job("started").put("delivery",true)));
+        assertNotNull(button(control,"Mark delivered"));assertNull(button(control,"On Delivery"));
+        assertEquals("arrived",ActiveJobControl.nextStage("on_the_way",false));
+        assertEquals("started",ActiveJobControl.nextStage("arrived",true));
+    }
+
+    @Test public void longActionCaptionFitsNarrowCardsAndLargerText()throws Exception {
+        for(int widthDp:new int[]{240,280,320}) {
+            ActiveJobControl control=control();
+            reply(requests.size()-1,new JSONObject().put("dispatch_enabled",true).put("active_job",job("on_the_way").put("delivery",true)));
+            View icon=button(control,"On Delivery");
+            android.widget.LinearLayout column=(android.widget.LinearLayout)icon.getParent();
+            android.widget.TextView caption=(android.widget.TextView)column.getChildAt(1);
+            caption.setTextSize(18); // larger accessibility text must retain every character
+            int width=Math.round(widthDp*host.activity().getResources().getDisplayMetrics().density);
+            control.view.measure(View.MeasureSpec.makeMeasureSpec(width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));
+            control.view.layout(0,0,width,control.view.getMeasuredHeight());
+            assertEquals("On Delivery",caption.getText().toString());
+            android.text.Layout layout=caption.getLayout();assertNotNull(layout);
+            assertEquals(caption.length(),layout.getLineEnd(layout.getLineCount()-1));
+            assertTrue("All lines fit in caption height",caption.getHeight()>=layout.getHeight()+caption.getCompoundPaddingTop()+caption.getCompoundPaddingBottom());
+            assertTrue("Caption fits its column",caption.getRight()<=column.getWidth());
+            assertTrue("Caption is not cut by column",caption.getBottom()<=column.getHeight());
+            android.view.ViewGroup row=(android.view.ViewGroup)column.getParent();
+            assertTrue("Actions stay within card",row.getWidth()<=width);
+            assertNotNull(button(control,"Cancel job"));assertNotNull(button(control,"Refresh"));
+        }
+    }
+
     @Test public void aDeliveryNamesItsStagesForTheTrip()throws Exception {
-        String[][] steps={{"accepted","To pickup"},{"on_the_way","At pickup"},{"arrived","Picked up"},{"started","Delivered"}};
+        String[][] steps={{"accepted","To pickup"},{"on_the_way","On Delivery"},{"arrived","On Delivery"},{"started","Mark delivered"}};
         for(String[] step:steps) {
             ActiveJobControl control=control();
             reply(requests.size()-1,new JSONObject().put("dispatch_enabled",true).put("active_job",job(step[0]).put("delivery",true)));
@@ -113,7 +147,8 @@ public class ActiveJobControlTest {
     @Test public void deliveredOnADeliveryOffersAPhotoOrNone()throws Exception {
         ActiveJobControl control=control();DeliveryPhoto photo=new DeliveryPhoto();photo.attach(host);control.setDeliveryPhoto(photo);
         reply(0,new JSONObject().put("dispatch_enabled",true).put("active_job",job("started").put("delivery",true)));
-        button(control,"Delivered").performClick();
+        assertNull(button(control,"Delivered"));
+        button(control,"Mark delivered").performClick();
         com.huynhdous.employeefield.core.ui.Popup popup=(com.huynhdous.employeefield.core.ui.Popup)org.robolectric.shadows.ShadowDialog.getLatestDialog();
         assertEquals("Take photo",popup.getButton(com.huynhdous.employeefield.core.ui.Popup.BUTTON_POSITIVE).getText().toString());
         assertEquals("No photo",popup.getButton(com.huynhdous.employeefield.core.ui.Popup.BUTTON_NEUTRAL).getText().toString());

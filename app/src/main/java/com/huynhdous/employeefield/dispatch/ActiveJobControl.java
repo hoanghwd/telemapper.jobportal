@@ -58,10 +58,10 @@ public final class ActiveJobControl {
         }
         jobs=list; route=response.optJSONObject("route"); render();
     }
-    static String nextStage(String status) {
+    static String nextStage(String status,boolean delivery) {
         switch(status) {
             case "accepted": return "on_the_way";
-            case "on_the_way": return "arrived";
+            case "on_the_way": return delivery?"started":"arrived";
             case "arrived": return "started";
             case "started": return "completed";
             default: return "";
@@ -72,8 +72,8 @@ public final class ActiveJobControl {
         switch(stage) {
             case "on_the_way": return delivery?"To pickup":"On the way";
             case "arrived": return delivery?"At pickup":"Arrived";
-            case "started": return delivery?"Picked up":"Start";
-            case "completed": return delivery?"Delivered":"Complete";
+            case "started": return delivery?"On Delivery":"Start";
+            case "completed": return delivery?"Mark delivered":"Complete";
             default: return "";
         }
     }
@@ -84,12 +84,12 @@ public final class ActiveJobControl {
         return text;
     }
     private void text(String value,int size) { view.addView(line(value,size,false,Theme.TEXT_PRIMARY,4,8)); }
-    private static int stageIcon(String stage) {
+    private static int stageIcon(String stage,boolean delivery) {
         switch(stage) {
             case "on_the_way": return R.drawable.ic_job_on_the_way;
             case "arrived": return R.drawable.ic_job_arrived;
             case "started": return R.drawable.ic_job_start;
-            default: return R.drawable.ic_job_complete;
+            default: return delivery?R.drawable.ic_delivery_package:R.drawable.ic_job_complete;
         }
     }
     private int dp(int value) { return Math.round(value*host.activity().getResources().getDisplayMetrics().density); }
@@ -101,13 +101,16 @@ public final class ActiveJobControl {
         button.setTooltipText(label);
         item.addView(button,new LinearLayout.LayoutParams(dp(56),dp(56)));
         TextView caption=new TextView(host.activity());caption.setText(label);caption.setTextSize(11);caption.setTextColor(Theme.TEXT_SECONDARY);
-        caption.setGravity(Gravity.CENTER);caption.setPadding(0,dp(4),0,0);item.addView(caption);
-        LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.setMargins(dp(10),dp(8),dp(10),0);row.addView(item,params);
+        caption.setGravity(Gravity.CENTER);caption.setPadding(0,dp(8),0,dp(4));
+        caption.setSingleLine(false);caption.setMaxLines(Integer.MAX_VALUE);caption.setEllipsize(null);
+        item.addView(caption,new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f);
+        params.setMargins(dp(4),dp(8),dp(4),0);row.addView(item,params);
         return button;
     }
     private LinearLayout actionRow() {
-        LinearLayout actions=new LinearLayout(host.activity());actions.setOrientation(LinearLayout.HORIZONTAL);actions.setGravity(Gravity.CENTER_HORIZONTAL);
+        LinearLayout actions=new LinearLayout(host.activity());actions.setOrientation(LinearLayout.HORIZONTAL);actions.setGravity(Gravity.TOP);
+        actions.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT));
         view.addView(actions);
         return actions;
     }
@@ -142,9 +145,9 @@ public final class ActiveJobControl {
         title.setOnClickListener(showDetails);body.setOnClickListener(showDetails);
         view.addView(line("Tap the order for details",12,false,Theme.TEXT_SECONDARY,0,4));
         LinearLayout actions=actionRow();
-        String next=nextStage(job.optString("status"));
+        String next=nextStage(job.optString("status"),job.optBoolean("delivery"));
         if(!next.isEmpty()) {
-            ImageButton advance=action(actions,stageIcon(next),Theme.PRIMARY,true,actionLabel(next,job.optBoolean("delivery")));
+            ImageButton advance=action(actions,stageIcon(next,job.optBoolean("delivery")),Theme.PRIMARY,true,actionLabel(next,job.optBoolean("delivery")));
             advance.setOnClickListener(v->{
                 if(next.equals("completed")&&job.optBoolean("delivery")&&deliveryPhoto!=null)new Popup.Builder(host.activity()).setTitle("Delivered?")
                     .setMessage("Take a photo of the order where you left it. The shop sees it once the office approves it.")
