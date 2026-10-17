@@ -159,7 +159,9 @@ public final class JobsTab extends TabModule {
         if (offered ? job.optLong("offer_id") > 0 : data.optBoolean("can_take")) {
             LinearLayout take = Theme.iconTextButton(context(), R.drawable.ic_job_complete, "Accept", Theme.SUCCESS);
             take.setOnClickListener(v -> confirm(job));
-            row.addView(take);
+            LinearLayout.LayoutParams takeParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            takeParams.leftMargin = (int) (10 * density);   // a gap between "Show on map" and "Accept"
+            row.addView(take, takeParams);
         }
         LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         rowParams.topMargin = (int) (6 * density);
