@@ -125,8 +125,6 @@ public final class InboxActions {
             if (!state.receive(new InboxState.Item(id, title, body))) return;
             save();
         }
-        // The offer sound is about to play: let the Jobs map refresh itself now, notifications on or off (it shows the order as offered).
-        com.huynhdous.employeefield.dispatch.DispatchEvents.offerArrived();
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         if (!manager.areNotificationsEnabled()) return;

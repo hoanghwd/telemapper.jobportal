@@ -12,7 +12,7 @@ import org.json.JSONObject;
 
 /**
  * The Jobs screen's map page: the same map, toolbar and look as My Trip, drawn by assets/leaflet/jobs-map.js from the server's list of jobs
- * the driver may take. Tapping a red pin offers "Take this job", which reaches the screen through {@link Bridge#takeJob}.
+ * the driver may take. Tapping the pin (the delivery address) offers "Accept", which reaches the screen through {@link Bridge#takeJob}.
  */
 final class JobsMap {
     private JobsMap() {
@@ -28,7 +28,7 @@ final class JobsMap {
                 + "var jobsData=" + available.toString().replace("<", "\\u003c") + ";</script><script src=\"jobs-map.js\"></script></body></html>";
     }
 
-    /** What the map page may ask of the screen: the toolbar's Refresh and Where am I (as on My Trip), and a tap on "Take this job". Register it as "AndroidBridge". */
+    /** What the map page may ask of the screen: the toolbar's Refresh and Where am I (as on My Trip), and a tap on "Accept". Register it as "AndroidBridge". */
     static final class Bridge extends TripMap.Bridge {
         private final Activity screen;
         private final java.util.function.LongConsumer onTake;

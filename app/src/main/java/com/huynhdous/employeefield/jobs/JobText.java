@@ -43,16 +43,10 @@ final class JobText {
         return pay == null || pay.isEmpty() || "null".equals(pay) ? "" : "Pay: $" + pay;
     }
 
-    /** "1 job is offered to you: ..." for the orders the dispatcher is offering him right now (answered from Notifications, not from the map). */
-    static String offeredLine(int offered) {
-        if (offered <= 0) return "";
-        return (offered == 1 ? "1 job is offered to you" : offered + " jobs are offered to you") + ": open Notifications (the bell) to accept or decline.";
-    }
-
     /** The line above the map: what is there to take, or why nothing is. */
     static String statusLine(boolean canTake, int jobs, int holding, int maxOrders, String message) {
         if (jobs == 0) return message == null || message.isEmpty() ? "No jobs are waiting near you right now." : message;
         if (!canTake) return jobs + (jobs == 1 ? " job is" : " jobs are") + " waiting, but you already hold the most orders (" + maxOrders + ").";
-        return jobs + (jobs == 1 ? " job you can take" : " jobs you can take") + (holding > 0 ? " on top of your orders." : ".") + " Tap a red pin, or Take this job below.";
+        return jobs + (jobs == 1 ? " job you can take" : " jobs you can take") + (holding > 0 ? " on top of your orders." : ".") + " Tap the pin, or Accept below.";
     }
 }

@@ -53,15 +53,9 @@ public class JobTextTest {
     public void theStatusLineSaysWhatThereIsToTakeOrWhyNot() {
         assertEquals("Your office has not turned on picking jobs yourself.", JobText.statusLine(false, 0, 0, 3, "Your office has not turned on picking jobs yourself."));
         assertEquals("No jobs are waiting near you right now.", JobText.statusLine(true, 0, 0, 3, ""));
-        assertEquals("1 job you can take. Tap a red pin, or Take this job below.", JobText.statusLine(true, 1, 0, 3, ""));
-        assertEquals("2 jobs you can take on top of your orders. Tap a red pin, or Take this job below.", JobText.statusLine(true, 2, 1, 3, ""));
+        assertEquals("1 job you can take. Tap the pin, or Accept below.", JobText.statusLine(true, 1, 0, 3, ""));
+        assertEquals("2 jobs you can take on top of your orders. Tap the pin, or Accept below.", JobText.statusLine(true, 2, 1, 3, ""));
         assertEquals("2 jobs are waiting, but you already hold the most orders (3).", JobText.statusLine(false, 2, 3, 3, ""));
     }
 
-    @Test
-    public void anOfferedOrderHasItsOwnLine() {
-        assertEquals("", JobText.offeredLine(0));
-        assertEquals("1 job is offered to you: open Notifications (the bell) to accept or decline.", JobText.offeredLine(1));
-        assertEquals("2 jobs are offered to you: open Notifications (the bell) to accept or decline.", JobText.offeredLine(2));
-    }
 }
