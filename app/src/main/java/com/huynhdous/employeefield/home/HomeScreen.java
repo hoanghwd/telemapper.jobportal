@@ -46,6 +46,7 @@ public final class HomeScreen {
     private DoorsTab doors;
     private com.huynhdous.employeefield.dispatch.DispatchReadyControl dispatch;
     private com.huynhdous.employeefield.dispatch.ActiveJobControl activeJob;
+    private com.huynhdous.employeefield.dispatch.TodayEarningsCard earnings;
     private ScheduleTab scheduleTab;
 
     public HomeScreen(Activity activity, Session session, ScheduleGate gate, TabManager tabs, AppHost host, Runnable signOut) {
@@ -72,8 +73,12 @@ public final class HomeScreen {
         panel.addView(dispatch.view, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         // A job accepted, advanced or cancelled changes the Schedule's day box too, so that reloads as well.
-        activeJob = new com.huynhdous.employeefield.dispatch.ActiveJobControl(host, session, () -> { dispatch.check(); if (scheduleTab != null) scheduleTab.onResume(); });
+        activeJob = new com.huynhdous.employeefield.dispatch.ActiveJobControl(host, session, () -> { dispatch.check(); if (earnings != null) earnings.refresh(); if (scheduleTab != null) scheduleTab.onResume(); });
         panel.addView(activeJob.view, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        earnings = new com.huynhdous.employeefield.dispatch.TodayEarningsCard(host, session);
+        LinearLayout.LayoutParams earningsParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        earningsParams.topMargin = (int) (8 * density);
+        panel.addView(earnings.view, earningsParams);
 
         title = newTitleBar(density);
         LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -98,6 +103,9 @@ public final class HomeScreen {
         doors = new DoorsTab();
         tabs.mount(Tabs.SCHEDULE, schedule, panel, pad);
         tabs.mount(Tabs.JOBS, new com.huynhdous.employeefield.jobs.JobsTab(), panel, pad);
+        com.huynhdous.employeefield.dispatch.DeliveryPhoto deliveryPhoto = new com.huynhdous.employeefield.dispatch.DeliveryPhoto();
+        tabs.mount(Tabs.DELIVERY_PHOTO, deliveryPhoto, panel, pad);   // not in the menu (see MENU_ORDER); it owns the camera answers
+        activeJob.setDeliveryPhoto(deliveryPhoto);
         tabs.mount(Tabs.TRIP, new TripTab(), panel, pad);
         tabs.mount(Tabs.TIMESHEET, new TimesheetTab(), panel, pad);
         tabs.mount(Tabs.PROFILE, new ProfileTab(), panel, pad);
@@ -122,7 +130,7 @@ public final class HomeScreen {
 
     /** Called by work-offer delivery on the UI thread. */
     public void close() { if (greeting != null) greeting.close(); }
-    public void refreshDispatch() { if (dispatch != null) dispatch.check(); if (activeJob != null) activeJob.refresh(); if (scheduleTab != null) scheduleTab.onResume(); }
+    public void refreshDispatch() { if (dispatch != null) dispatch.check(); if (activeJob != null) activeJob.refresh(); if (earnings != null) earnings.refresh(); if (scheduleTab != null) scheduleTab.onResume(); }
 
     public void receiveWorkOffer(String id, String title, String body) {
         if (greeting != null) greeting.receiveWorkOffer(id, title, body);

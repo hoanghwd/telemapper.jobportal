@@ -19,10 +19,11 @@ import static org.junit.Assert.*;
 @RunWith(RobolectricTestRunner.class) @Config(sdk=28)
 public class ActiveJobControlTest {
     final List<Object[]> requests=new ArrayList<>();int changes;
+    AppHost host;
     ActiveJobControl control() {
         Activity activity=Robolectric.buildActivity(Activity.class).setup().get();
         Session session=new Session();session.token="fixture";session.employeeId=7;
-        AppHost host=(AppHost)Proxy.newProxyInstance(AppHost.class.getClassLoader(),new Class[]{AppHost.class},(p,m,args)->{
+        host=(AppHost)Proxy.newProxyInstance(AppHost.class.getClassLoader(),new Class[]{AppHost.class},(p,m,args)->{
             if(m.getName().equals("activity"))return activity;
             if(m.getName().equals("request"))requests.add(args);
             return null;
@@ -97,6 +98,36 @@ public class ActiveJobControlTest {
         List<String> shown=texts(control);
         assertTrue(shown.contains("Current delivery request"));assertFalse(shown.contains("Suggested route"));
         assertEquals(1,withLabel(control,"Refresh").size());assertEquals(1,withLabel(control,"On the way").size());
+    }
+    @Test public void aDeliveryNamesItsStagesForTheTrip()throws Exception {
+        String[][] steps={{"accepted","To pickup"},{"on_the_way","At pickup"},{"arrived","Picked up"},{"started","Delivered"}};
+        for(String[] step:steps) {
+            ActiveJobControl control=control();
+            reply(requests.size()-1,new JSONObject().put("dispatch_enabled",true).put("active_job",job(step[0]).put("delivery",true)));
+            assertNotNull(step[1],button(control,step[1]));
+        }
+        ActiveJobControl service=control();reply(requests.size()-1,status("accepted"));
+        assertNotNull("a service job keeps the plain wording",button(service,"On the way"));
+        assertNull(button(service,"To pickup"));
+    }
+    @Test public void deliveredOnADeliveryOffersAPhotoOrNone()throws Exception {
+        ActiveJobControl control=control();DeliveryPhoto photo=new DeliveryPhoto();photo.attach(host);control.setDeliveryPhoto(photo);
+        reply(0,new JSONObject().put("dispatch_enabled",true).put("active_job",job("started").put("delivery",true)));
+        button(control,"Delivered").performClick();
+        com.huynhdous.employeefield.core.ui.Popup popup=(com.huynhdous.employeefield.core.ui.Popup)org.robolectric.shadows.ShadowDialog.getLatestDialog();
+        assertEquals("Take photo",popup.getButton(com.huynhdous.employeefield.core.ui.Popup.BUTTON_POSITIVE).getText().toString());
+        assertEquals("No photo",popup.getButton(com.huynhdous.employeefield.core.ui.Popup.BUTTON_NEUTRAL).getText().toString());
+        assertEquals(1,requests.size());   // nothing is sent until the driver chooses
+        popup.getButton(com.huynhdous.employeefield.core.ui.Popup.BUTTON_NEUTRAL).performClick();
+        assertEquals("dispatch/progress",requests.get(1)[0]);
+        JSONObject sent=(JSONObject)requests.get(1)[1];assertEquals("completed",sent.getString("stage"));assertEquals("1",sent.getString("offer_id"));
+    }
+    @Test public void aServiceJobNeverAsksForADeliveryPhoto()throws Exception {
+        ActiveJobControl control=control();DeliveryPhoto photo=new DeliveryPhoto();photo.attach(host);control.setDeliveryPhoto(photo);
+        reply(0,status("started"));
+        button(control,"Complete").performClick();
+        assertNull("the plain confirmation, not the photo question",org.robolectric.shadows.ShadowDialog.getLatestDialog() instanceof com.huynhdous.employeefield.core.ui.Popup?org.robolectric.shadows.ShadowDialog.getLatestDialog():null);
+        assertNotNull(ShadowAlertDialog.getLatestAlertDialog());
     }
     @Test public void tappingTheOrderShowsItsDetailsInAPopup()throws Exception {
         ActiveJobControl control=control();

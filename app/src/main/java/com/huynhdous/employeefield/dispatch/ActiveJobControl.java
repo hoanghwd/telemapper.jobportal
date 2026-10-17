@@ -29,6 +29,7 @@ public final class ActiveJobControl {
     private boolean updating;
     private JSONArray jobs=new JSONArray();
     private JSONObject route;
+    private DeliveryPhoto deliveryPhoto;
 
     public ActiveJobControl(AppHost host, Session session, Runnable changed) {
         this.host=host; this.session=session; this.changed=changed;
@@ -37,6 +38,8 @@ public final class ActiveJobControl {
         view.setPadding(pad,pad,pad,pad); view.setBackground(Theme.cardBackground(host.activity()));
         view.setVisibility(View.GONE); refresh();
     }
+    /** The screen that takes the delivery photo; without it "Delivered" just asks to confirm (as in the tests and on an older home screen). */
+    public void setDeliveryPhoto(DeliveryPhoto photo) { this.deliveryPhoto=photo; }
     public void refresh() {
         if(updating)return;
         long version=++readVersion;
@@ -64,12 +67,13 @@ public final class ActiveJobControl {
             default: return "";
         }
     }
-    private static String actionLabel(String stage) {
+    /** The caption under the stage button. A delivery goes to the pickup, then the drop-off, so its stages are named for that. */
+    static String actionLabel(String stage,boolean delivery) {
         switch(stage) {
-            case "on_the_way": return "On the way";
-            case "arrived": return "Arrived";
-            case "started": return "Start";
-            case "completed": return "Complete";
+            case "on_the_way": return delivery?"To pickup":"On the way";
+            case "arrived": return delivery?"At pickup":"Arrived";
+            case "started": return delivery?"Picked up":"Start";
+            case "completed": return delivery?"Delivered":"Complete";
             default: return "";
         }
     }
@@ -140,10 +144,15 @@ public final class ActiveJobControl {
         LinearLayout actions=actionRow();
         String next=nextStage(job.optString("status"));
         if(!next.isEmpty()) {
-            ImageButton advance=action(actions,stageIcon(next),Theme.PRIMARY,true,actionLabel(next));
+            ImageButton advance=action(actions,stageIcon(next),Theme.PRIMARY,true,actionLabel(next,job.optBoolean("delivery")));
             advance.setOnClickListener(v->{
-                if(next.equals("completed"))new AlertDialog.Builder(host.activity()).setTitle("Complete job?")
-                    .setMessage("Confirm the work is finished.").setPositiveButton("Complete",(dialog,which)->advance(job,next,advance))
+                if(next.equals("completed")&&job.optBoolean("delivery")&&deliveryPhoto!=null)new Popup.Builder(host.activity()).setTitle("Delivered?")
+                    .setMessage("Take a photo of the order where you left it. The shop sees it once the office approves it.")
+                    .setPositiveButton("Take photo",(dialog,which)->deliveryPhoto.deliver(job.optString("id")))
+                    .setNeutralButton("No photo",(dialog,which)->advance(job,next,advance))
+                    .setNegativeButton("Cancel",null).show();
+                else if(next.equals("completed"))new AlertDialog.Builder(host.activity()).setTitle(job.optBoolean("delivery")?"Delivered?":"Complete job?")
+                    .setMessage(job.optBoolean("delivery")?"Confirm the order was handed to the customer.":"Confirm the work is finished.").setPositiveButton(job.optBoolean("delivery")?"Delivered":"Complete",(dialog,which)->advance(job,next,advance))
                     .setNegativeButton("Cancel",null).show();
                 else advance(job,next,advance);
             });
@@ -224,7 +233,7 @@ public final class ActiveJobControl {
                 boolean completed="completed".equals(updated.optString("status")),moreLeft=false;
                 if(completed) moreLeft=drop(updated.optString("id")); else update(updated);
                 render();changed.run();
-                if(completed) new AlertDialog.Builder(host.activity()).setMessage("Job completed. You can receive another offer when Ready.").setPositiveButton("OK",null).show();
+                if(completed) new AlertDialog.Builder(host.activity()).setMessage((updated.optBoolean("delivery")?"Delivery completed":"Job completed")+". You can receive another offer when Ready.").setPositiveButton("OK",null).show();
                 if(moreLeft) refresh();
             },false,(code,message)->{updating=false;button.setEnabled(true);if(code==409||code==403)refresh();return false;});
         } catch(Exception e) { throw new IllegalStateException(e); }
