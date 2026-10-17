@@ -9,8 +9,9 @@ import java.util.Map;
 public final class InboxState {
     public static final class Item {
         public final String id, title, body;
-        public String mapJson;
+        public String mapJson, businessName = "";
         public boolean messageRead, notificationRead;
+        public String requestHeading() { return businessName.trim().isEmpty() ? "Order Requests" : businessName.trim()+" - Order Request"; }
         /** Brief delivery preview using the exact route and driver pay already in the offer. */
         public String deliveryPreview() {
             StringBuilder preview = new StringBuilder();

@@ -54,7 +54,7 @@ public final class DispatchPolling {
             JSONObject offer = response.optJSONObject("pending_offer");
             inbox.setPendingOffer(offer != null ? "offer:" + offer.getString("id") : "");
             if (ready && isReady(token) && offer != null)
-                inbox.receiveWorkOffer("offer:" + offer.getString("id"), offer.getString("title"), offer.getString("body"), offer.optJSONObject("map")==null ? "" : offer.getJSONObject("map").toString());
+                inbox.receiveWorkOffer("offer:" + offer.getString("id"), offer.getString("title"), offer.getString("body"), offer.optJSONObject("map")==null ? "" : offer.getJSONObject("map").toString(), offer.optString("business_name", ""));
             next = clock.getAsLong() + interval * 1000L;
         } catch (Api.ApiError e) {
             if (e.code == 401 || e.code == 403) { ready(token, false); lastReady = false; pendingUnavailable = false; status = e.getMessage(); }

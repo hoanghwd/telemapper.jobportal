@@ -36,6 +36,7 @@ public class InboxDeliveryTest {
         assertEquals("● TP202610170085\nDrop-off: Customer address\nDistance: 1.5 mi\nOffer: $4.46",label.toString());
         android.widget.TextView row=(android.widget.TextView)list.getListView().getAdapter().getView(0,null,list.getListView());
         assertEquals(label.toString(),row.getText().toString());assertTrue(row.getMaxLines()>=4);
+        assertEquals(14f,row.getTextSize()/activity.getResources().getDisplayMetrics().scaledDensity,0.01f);
         list.getListView().performItemClick(null,0,0);
         AlertDialog detail=ShadowAlertDialog.getLatestAlertDialog();
         assertEquals(body,shadowOf(detail).getMessage().toString());
@@ -135,4 +136,25 @@ public class InboxDeliveryTest {
         assertEquals("Messages, 0 unread",button.getChildAt(0).getContentDescription());
         other.close();
     }
+    @Test public void businessHeadingMatchesRingingAndRestoredBellPopup() throws Exception {
+        Activity activity=Robolectric.buildActivity(Activity.class).setup().get();
+        activity.getSharedPreferences("work_inbox_184",0).edit().clear().commit();
+        InboxActions inbox=new InboxActions(activity,184);inbox.setWorkOffersEnabled(true);inbox.setPendingOffer("offer:600");
+        String body="Pick up: Bakery\nDrop off: Customer\nTotal distance: 12 mi\nOffer Amount: $7.57";
+        inbox.receiveWorkOffer("offer:600","TP600",body,"","Sweethouse Bakery");
+        android.app.Notification notification=shadowOf(activity.getSystemService(NotificationManager.class)).getAllNotifications().get(0);
+        assertEquals("Sweethouse Bakery - Order Request",notification.extras.getCharSequence(android.app.Notification.EXTRA_TITLE).toString());
+        String expected="TP600\nDrop-off: Customer\nDistance: 12 mi\nOffer: $7.57";
+        assertEquals(expected,notification.extras.getCharSequence(android.app.Notification.EXTRA_TEXT).toString());
+        android.view.View banner=notification.headsUpContentView.apply(activity,new LinearLayout(activity));
+        assertEquals("Sweethouse Bakery - Order Request",((android.widget.TextView)banner.findViewById(com.huynhdous.employeefield.R.id.notification_offer_title)).getText().toString());
+        assertEquals(expected,((android.widget.TextView)banner.findViewById(com.huynhdous.employeefield.R.id.notification_offer_summary)).getText().toString());
+        inbox.close();inbox=new InboxActions(activity,184);
+        java.lang.reflect.Method show=InboxActions.class.getDeclaredMethod("show",boolean.class);show.setAccessible(true);show.invoke(inbox,false);
+        assertEquals("Sweethouse Bakery - Order Request",shadowOf(ShadowAlertDialog.getLatestAlertDialog()).getTitle().toString());
+        inbox.receiveWorkOffer("offer:600","TP600",body,"","Other Bakery");
+        show.invoke(inbox,false);assertEquals("Other Bakery - Order Request",shadowOf(ShadowAlertDialog.getLatestAlertDialog()).getTitle().toString());
+        assertEquals(1,shadowOf(activity.getSystemService(NotificationManager.class)).getAllNotifications().size());inbox.close();
+    }
+
 }

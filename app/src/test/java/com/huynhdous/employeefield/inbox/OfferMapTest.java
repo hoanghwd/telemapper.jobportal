@@ -48,7 +48,7 @@ public class OfferMapTest {
         AlertDialog dialog=ShadowAlertDialog.getLatestAlertDialog();
         WebView map=findMap(dialog.getWindow().getDecorView());assertNotNull(map);
         assertEquals(Math.round(180*activity.getResources().getDisplayMetrics().density),map.getLayoutParams().height);
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();assertEquals("500:accepted",decision[0]);inbox.close();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();shadowOf(android.os.Looper.getMainLooper()).idle();assertEquals("500:accepted",decision[0]);inbox.close();
     }
     private void JSONArrayCheck(Activity activity) throws Exception {
         JSONObject saved=new org.json.JSONArray(activity.getSharedPreferences("work_inbox_180",0).getString("items","[]")).getJSONObject(0);

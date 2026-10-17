@@ -116,4 +116,32 @@ public class TodayEarningsCardTest {
         assertEquals("CAD 8.38",TodayEarningsCard.money("8.38","CAD"));
         assertEquals("$8.38",TodayEarningsCard.money("8.38",""));
     }
+    @Test public void todayAndWeekRenderAsTwoSeparateCardsAndOpenTheirOwnLists() throws Exception {
+        TodayEarningsCard card=card();JSONObject response=day();
+        JSONObject week=new JSONObject().put("start_date","2026-10-12").put("end_date","2026-10-18").put("currency","USD")
+            .put("earned","30.00").put("paid","10.00").put("owed","20.00").put("completed_count",4).put("unpriced_count",0)
+            .put("deliveries",new JSONArray().put(new JSONObject().put("order","WEEK-ONLY").put("completed_utc","2026-10-12 18:00:00").put("pay","30.00").put("paid",false)));
+        response.put("week",week);reply(0,response);
+        assertEquals(2,card.view.getChildCount());assertNull(card.view.getBackground());
+        View today=card.view.getChildAt(0),weekly=card.view.getChildAt(1);
+        assertNotNull(today.getBackground());assertNotNull(weekly.getBackground());
+        assertTrue(texts(today).contains("$13.38"));assertFalse(texts(today).contains("$30.00"));
+        List<String> summary=texts(weekly);
+        assertTrue(summary.contains("This week's earnings"));assertTrue(summary.contains("Oct 12 – Oct 18"));
+        assertTrue(summary.contains("$30.00"));assertTrue(summary.contains("4 deliveries completed this week"));
+        assertTrue(summary.contains("Marked paid $10.00 · Not paid yet $20.00"));
+        weekly.performClick();List<String> popup=texts(ShadowDialog.getLatestDialog().getWindow().getDecorView());
+        assertTrue(popup.contains("This week's deliveries"));
+        assertTrue(popup.toString().contains("WEEK-ONLY"));assertFalse(popup.toString().contains("TP5"));
+        today.performClick();popup=texts(ShadowDialog.getLatestDialog().getWindow().getDecorView());
+        assertTrue(popup.contains("Today's deliveries"));assertTrue(popup.toString().contains("TP5"));assertFalse(popup.toString().contains("WEEK-ONLY"));
+    }
+    @Test public void quietWeekShowsZeroButHasNoDeliveryPopup() throws Exception {
+        TodayEarningsCard card=card();reply(0,day().put("week",new JSONObject().put("earned","0.00").put("completed_count",0).put("deliveries",new JSONArray())));
+        View weekly=card.view.getChildAt(1);assertTrue(texts(weekly).contains("$0.00"));
+        assertTrue(texts(weekly).contains("0 deliveries completed this week"));
+        weekly.performClick();assertNull(ShadowDialog.getLatestDialog());
+        assertEquals("Dec 28 – Jan 3",TodayEarningsCard.weekRange("2026-12-28","2027-01-03"));
+    }
+
 }

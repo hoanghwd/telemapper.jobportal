@@ -32,11 +32,9 @@ public final class TodayEarningsCard {
         this.session = session;
         view = new LinearLayout(host.activity());
         view.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(16);
-        view.setPadding(pad, pad, pad, pad);
-        view.setBackground(Theme.cardBackground(host.activity()));
+
         view.setVisibility(View.GONE);
-        view.setOnClickListener(v -> { if (data != null) showList(); });
+        view.setOnClickListener(v -> { if (data != null) showList(false); });
         refresh();
     }
 
@@ -79,21 +77,46 @@ public final class TodayEarningsCard {
         view.removeAllViews();
         if (data == null || !data.optBoolean("dispatch_enabled")) { view.setVisibility(View.GONE); return; }
         view.setVisibility(View.VISIBLE);
-        String currency = data.optString("currency", "USD");
-        view.addView(line("Today's earnings", 13, false, Theme.TEXT_SECONDARY, 0));
-        view.addView(line(money(data.optString("earned", "0.00"), currency), 28, true, Theme.TEXT_PRIMARY, dp(2)));
-        view.addView(line(countText(data.optInt("completed_count"), data.optInt("unpriced_count")), 14, false, Theme.TEXT_PRIMARY, dp(2)));
-        if (data.optInt("in_progress_count") > 0)
-            view.addView(line("+" + money(data.optString("in_progress", "0.00"), currency) + " when your current delivery is completed", 13, false, Theme.TEXT_SECONDARY, dp(4)));
-        if (data.optInt("completed_count") > 0 && !"0.00".equals(data.optString("earned")))
-            view.addView(line("Marked paid " + money(data.optString("paid", "0.00"), currency) + " · Not paid yet " + money(data.optString("owed", "0.00"), currency), 13, false, Theme.TEXT_SECONDARY, dp(4)));
-        if (data.optInt("completed_count") > 0) view.addView(line("Tap for today's deliveries", 12, false, Theme.TEXT_SECONDARY, dp(6)));
+        addCard(data,false);
+        JSONObject week=data.optJSONObject("week");
+        if(week!=null)addCard(week,true);
+    }
+
+    private void addCard(JSONObject period,boolean weekly) {
+        LinearLayout card=new LinearLayout(host.activity());card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16),dp(16),dp(16),dp(16));card.setBackground(Theme.cardBackground(host.activity()));
+        card.setOnClickListener(v->showList(weekly));
+        LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT);
+        if(weekly)params.topMargin=dp(10);view.addView(card,params);
+        String currency=period.optString("currency","USD");
+        card.addView(line(weekly?"This week's earnings":"Today's earnings",13,false,Theme.TEXT_SECONDARY,0));
+        if(weekly) {
+            String range=weekRange(period.optString("start_date"),period.optString("end_date"));
+            if(!range.isEmpty())card.addView(line(range,12,false,Theme.TEXT_SECONDARY,dp(2)));
+        }
+        card.addView(line(money(period.optString("earned","0.00"),currency),28,true,Theme.TEXT_PRIMARY,dp(2)));
+        String count=countText(period.optInt("completed_count"),period.optInt("unpriced_count"));
+        if(weekly)count=count.replace("today","this week");
+        card.addView(line(count,14,false,Theme.TEXT_PRIMARY,dp(2)));
+        if(!weekly && period.optInt("in_progress_count")>0)
+            card.addView(line("+"+money(period.optString("in_progress","0.00"),currency)+" when your current delivery is completed",13,false,Theme.TEXT_SECONDARY,dp(4)));
+        if(period.optInt("completed_count")>0 && !"0.00".equals(period.optString("earned")))
+            card.addView(line("Marked paid "+money(period.optString("paid","0.00"),currency)+" · Not paid yet "+money(period.optString("owed","0.00"),currency),13,false,Theme.TEXT_SECONDARY,dp(4)));
+        if(period.optInt("completed_count")>0)card.addView(line(weekly?"Tap for this week's deliveries":"Tap for today's deliveries",12,false,Theme.TEXT_SECONDARY,dp(6)));
+    }
+
+    static String weekRange(String start,String end) {
+        try {
+            DateTimeFormatter format=DateTimeFormatter.ofPattern("MMM d",Locale.US);
+            return java.time.LocalDate.parse(start).format(format)+" – "+java.time.LocalDate.parse(end).format(format);
+        } catch(Exception invalid){return "";}
     }
 
     /** One line per delivery: order number, time (this phone's clock), amount and whether it is paid. */
-    static String listText(JSONArray deliveries, String currency) {
+    static String listText(JSONArray deliveries, String currency) { return listText(deliveries,currency,false); }
+    static String listText(JSONArray deliveries, String currency, boolean weekly) {
         StringBuilder out = new StringBuilder();
-        DateTimeFormatter time = DateTimeFormatter.ofPattern("h:mm a", Locale.US).withZone(ZoneId.systemDefault());
+        DateTimeFormatter time = DateTimeFormatter.ofPattern(weekly ? "EEE, MMM d · h:mm a" : "h:mm a", Locale.US).withZone(ZoneId.systemDefault());
         for (int i = 0; i < deliveries.length(); i++) {
             JSONObject d = deliveries.optJSONObject(i);
             if (d == null) continue;
@@ -106,11 +129,13 @@ public final class TodayEarningsCard {
         return out.toString();
     }
 
-    private void showList() {
-        JSONArray deliveries = data.optJSONArray("deliveries");
+    private void showList(boolean weekly) {
+        JSONObject period=weekly?data.optJSONObject("week"):data;
+        if(period==null)return;
+        JSONArray deliveries = period.optJSONArray("deliveries");
         if (deliveries == null || deliveries.length() == 0) return;
-        new Popup.Builder(host.activity()).setTitle("Today's deliveries")
-                .setMessage(listText(deliveries, data.optString("currency", "USD")))
+        new Popup.Builder(host.activity()).setTitle(weekly?"This week's deliveries":"Today's deliveries")
+                .setMessage(listText(deliveries, period.optString("currency", "USD"),weekly))
                 .setPositiveButton("Close", null)
                 .setNeutralButton("Refresh", (d, w) -> refresh()).show();
     }

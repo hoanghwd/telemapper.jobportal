@@ -50,7 +50,7 @@ public final class ScheduleTab extends TabModule {
 
     @Override
     public String title() {
-        return "Schedule";
+        return "Weekly Disposition";
     }
 
     @Override
@@ -77,7 +77,7 @@ public final class ScheduleTab extends TabModule {
         periodButton.setGravity(Gravity.CENTER_VERTICAL);
         periodButton.setPadding(TimeCardUi.dp(context(),14),0,TimeCardUi.dp(context(),10),0);
         periodButton.setBackground(Theme.cardBackground(context()));
-        periodButton.setContentDescription("Choose schedule period");
+        periodButton.setContentDescription("Choose weekly disposition period");
         periodButton.setOnClickListener(v -> com.huynhdous.employeefield.core.ui.WeekPeriodPicker.show(context(), previousWeeks, this::selectPeriod));
         LinearLayout.LayoutParams periodParams = new LinearLayout.LayoutParams(0,TimeCardUi.dp(context(),48),1f);
         periodParams.rightMargin=TimeCardUi.dp(context(),10); controls.addView(periodButton,periodParams); controls.addView(refresh);
