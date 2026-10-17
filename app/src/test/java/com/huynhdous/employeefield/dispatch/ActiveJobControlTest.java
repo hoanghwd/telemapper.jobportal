@@ -131,7 +131,7 @@ public class ActiveJobControlTest {
     }
     @Test public void tappingTheOrderShowsItsDetailsInAPopup()throws Exception {
         ActiveJobControl control=control();
-        JSONObject delivery=job("accepted").put("title","TP101").put("body","Drop off: A\nPick up: B").put("details","Drop off: A\nPick up: B\nCustomer: Sam");
+        JSONObject delivery=job("accepted").put("title","TP101").put("body","Pick up: B\nDrop off: A").put("details","Pick up: B\nDrop off: A\nCustomer: Sam");
         reply(0,new JSONObject().put("dispatch_enabled",true).put("active_job",delivery));
         assertTrue(texts(control).contains("Tap the order for details"));
         walk(control.view,v->{if(v instanceof android.widget.TextView&&"TP101".contentEquals(((android.widget.TextView)v).getText()))v.performClick();});
@@ -139,7 +139,7 @@ public class ActiveJobControlTest {
         assertNotNull(popup);
         java.util.List<String> inside=new ArrayList<>();
         walk(popup.getWindow().getDecorView(),v->{if(v instanceof android.widget.TextView)inside.add(((android.widget.TextView)v).getText().toString());});
-        assertTrue(inside.contains("Drop off: A\nPick up: B\nCustomer: Sam"));
+        assertTrue(inside.contains("Pick up: B\nDrop off: A\nCustomer: Sam"));
     }
     @Test public void advancingOneOrderSendsOnlyThatOrderAndUpdatesOnlyIt()throws Exception {
         ActiveJobControl control=control();reply(0,threeOrders());

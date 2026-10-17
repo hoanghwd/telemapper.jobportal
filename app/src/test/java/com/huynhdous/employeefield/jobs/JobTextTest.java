@@ -57,4 +57,11 @@ public class JobTextTest {
         assertEquals("2 jobs you can take on top of your orders. Tap a red pin, or Take this job below.", JobText.statusLine(true, 2, 1, 3, ""));
         assertEquals("2 jobs are waiting, but you already hold the most orders (3).", JobText.statusLine(false, 2, 3, 3, ""));
     }
+
+    @Test
+    public void anOfferedOrderHasItsOwnLine() {
+        assertEquals("", JobText.offeredLine(0));
+        assertEquals("1 job is offered to you: open Notifications (the bell) to accept or decline.", JobText.offeredLine(1));
+        assertEquals("2 jobs are offered to you: open Notifications (the bell) to accept or decline.", JobText.offeredLine(2));
+    }
 }

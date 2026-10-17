@@ -8,6 +8,7 @@ import android.widget.TextView;
 
 import com.huynhdous.employeefield.R;
 import com.huynhdous.employeefield.core.tab.TabModule;
+import com.huynhdous.employeefield.core.ui.Popup;
 import com.huynhdous.employeefield.core.ui.Theme;
 import com.huynhdous.employeefield.core.ui.TimeCardUi;
 
@@ -335,9 +336,17 @@ public final class ScheduleTab extends TabModule {
                 rows = java.util.Collections.emptyList();
             }
             // A day with accepted jobs shows them (and, below, its time clock) even though nothing was scheduled.
-            for (JSONObject job : jobs)
-                addRow(DAY_CODES[date.getDayOfWeek().getValue() - 1], isToday ? Theme.PRIMARY : 0xffe5e7eb, isToday ? 0xffffffff : Theme.NEUTRAL,
+            // The day's jobs are numbered, the latest first (1 is the newest), so two orders of one day are told apart by more than the weekday.
+            java.util.List<JSONObject> newestFirst = latestFirst(jobs);
+            for (int n = 0; n < newestFirst.size(); n++) {
+                JSONObject job = newestFirst.get(n);
+                LinearLayout jobRow = addRow(String.valueOf(n + 1), isToday ? Theme.PRIMARY : 0xffe5e7eb, isToday ? 0xffffffff : Theme.NEUTRAL,
                         job.optString("title", "Job"), jobStatusText(job, zone), density, dayCard);
+                final java.time.ZoneId jobZone = zone;
+                jobRow.setClickable(true);
+                jobRow.setOnClickListener(v -> new Popup.Builder(context()).setTitle(orderNumber(job.optString("title", "Job")))
+                        .setMessage(jobDetailsText(job, jobZone)).setPositiveButton("Close", null).show());
+            }
             for (JSONObject a : rows) {
                 String startTime = a.getString("start_time"), endTime = a.getString("end_time");
                 addRow(DAY_CODES[date.getDayOfWeek().getValue() - 1], isToday ? Theme.PRIMARY : 0xffe5e7eb, isToday ? 0xffffffff : Theme.NEUTRAL,
@@ -418,6 +427,67 @@ public final class ScheduleTab extends TabModule {
         }
     }
 
+    /** When a job last changed (UTC "yyyy-MM-dd HH:mm:ss", so it sorts as text): its latest stage; a cancelled job shows when it was cancelled (stored in accepted_utc). */
+    static String latestStageTime(JSONObject job) {
+        String[] fields = "declined".equals(job.optString("status")) ? new String[]{"accepted_utc"} : new String[]{"completed_utc", "started_utc", "arrived_utc", "on_the_way_utc", "accepted_utc"};
+        for (String field : fields) if (!job.isNull(field) && !job.optString(field).isEmpty()) return job.optString(field);
+        return "";
+    }
+
+    /** "Bakery delivery sweethouse-TP202610150003" is shown as its order number, "TP202610150003"; any other title stays as it is. */
+    static String orderNumber(String title) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("-([A-Za-z0-9]+)$").matcher(title == null ? "" : title);
+        return m.find() ? m.group(1) : (title == null ? "" : title);
+    }
+
+    /** A stage's day and time in the office's zone ("Thu Oct 15, 9:09 PM"): the popup shows the date too, because a job can be from an earlier day. */
+    private static String stageTime(JSONObject job, String field, java.time.ZoneId zone) {
+        if (job.isNull(field) || job.optString(field).isEmpty()) return null;
+        try {
+            return java.time.LocalDateTime.parse(job.getString(field).replace(' ', 'T')).atZone(java.time.ZoneOffset.UTC).withZoneSameInstant(zone)
+                    .format(java.time.format.DateTimeFormatter.ofPattern("EEE MMM d, h:mm a", java.util.Locale.US));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * What the popup shows for a tapped job: the server's description of the order (drop off, pick up, distance, amount, customer, notes), then when each
+     * stage happened in the office's time. A delivery's stages are named for the trip. A cancelled job shows when it was cancelled.
+     */
+    static String jobDetailsText(JSONObject job, java.time.ZoneId zone) {
+        boolean delivery = job.optBoolean("delivery");
+        boolean cancelled = "declined".equals(job.optString("status"));
+        String[][] stages = delivery
+                ? new String[][]{{"accepted_utc", "Accepted"}, {"on_the_way_utc", "On the way to pickup"}, {"arrived_utc", "At pickup"}, {"started_utc", "Picked up"}, {"completed_utc", "Delivered"}}
+                : new String[][]{{"accepted_utc", "Accepted"}, {"on_the_way_utc", "On the way"}, {"arrived_utc", "Arrived"}, {"started_utc", "Work started"}, {"completed_utc", "Completed"}};
+        StringBuilder out = new StringBuilder(job.optString("details", "").trim());
+        StringBuilder timeline = new StringBuilder();
+        for (String[] stage : stages) {
+            if (cancelled && "accepted_utc".equals(stage[0])) continue;   // for a cancelled job accepted_utc holds the time it was cancelled
+            String time = stageTime(job, stage[0], zone);
+            if (time != null) timeline.append(timeline.length() > 0 ? "\n" : "").append(stage[1]).append(" ").append(time);
+        }
+        if (cancelled) {
+            String time = stageTime(job, "accepted_utc", zone);
+            timeline.append(timeline.length() > 0 ? "\n" : "").append("Cancelled").append(time == null ? "" : " " + time);
+        }
+        if (timeline.length() > 0) {
+            // Which clock the times are on, e.g. "(Times are Los Angeles time)".
+            String zoneName = zone.getId().substring(zone.getId().indexOf('/') + 1).replace('_', ' ');
+            timeline.append("\n(Times are ").append(zoneName).append(" time)");
+            out.append(out.length() > 0 ? "\n\n" : "").append(timeline);
+        }
+        return out.toString();
+    }
+
+    /** The jobs of one day, newest first (ties keep the server's order). */
+    static java.util.List<JSONObject> latestFirst(java.util.List<JSONObject> jobs) {
+        java.util.List<JSONObject> sorted = new java.util.ArrayList<>(jobs);
+        sorted.sort((a, b) -> latestStageTime(b).compareTo(latestStageTime(a)));
+        return sorted;
+    }
+
     /** "On the way 8:30 PM": the job's status and the time of its latest stage, in the office's time zone. */
     static String jobStatusText(JSONObject job, java.time.ZoneId zone) {
         String status = job.optString("status_label", "Accepted");
@@ -441,7 +511,7 @@ public final class ScheduleTab extends TabModule {
     }
 
     /** One shift (or "No assignments") as a card: a round day code, the place and the hours. */
-    private void addRow(String avatarText, int avatarBg, int avatarTextColor, String title, String subtitle, float density, LinearLayout parent) {
+    private LinearLayout addRow(String avatarText, int avatarBg, int avatarTextColor, String title, String subtitle, float density, LinearLayout parent) {
         LinearLayout row = new LinearLayout(context());
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -483,5 +553,6 @@ public final class ScheduleTab extends TabModule {
         LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         cardParams.topMargin = (int) (8 * density);
         parent.addView(row, cardParams);
+        return row;
     }
 }

@@ -40,11 +40,13 @@
             html: '<span style="background:' + color + '">' + number + '</span>',
             iconSize: [30, 30], iconAnchor: [15, 15]
         });
-        const pinIcon = L.divIcon({
+        const pinFor = color => L.divIcon({
             className: 'pin-icon',
-            html: '<svg viewBox="0 0 24 32" width="28" height="36"><path d="M12 0C5.4 0 0 5.2 0 11.6 0 20 12 32 12 32s12-12 12-20.4C24 5.2 18.6 0 12 0z" fill="#dc2626" stroke="#fff" stroke-width="2"/><circle cx="12" cy="11.5" r="4.5" fill="#fff"/></svg>',
+            html: '<svg viewBox="0 0 24 32" width="28" height="36"><path d="M12 0C5.4 0 0 5.2 0 11.6 0 20 12 32 12 32s12-12 12-20.4C24 5.2 18.6 0 12 0z" fill="' + color + '" stroke="#fff" stroke-width="2"/><circle cx="12" cy="11.5" r="4.5" fill="#fff"/></svg>',
             iconSize: [28, 36], iconAnchor: [14, 36], popupAnchor: [0, -34]
         });
+
+        const pinIcon = pinFor('#dc2626'), offeredPinIcon = pinFor('#d97706');
 
         // The popup of a waiting job: its order number, both addresses, how far, what it adds, and the button that takes it.
         const jobPopup = job => {
@@ -56,7 +58,8 @@
             line(box, 'div', fmt(job.miles_to_pickup) + ' mi' + mins(job.minutes_to_pickup) + ' to the pickup · trip ' + fmt(job.trip_miles) + ' mi' + mins(job.trip_minutes), 'margin-top:4px;color:#475569');
             if (job.pay !== null && job.pay !== undefined && job.pay !== '') line(box, 'div', 'Pay: $' + job.pay, 'margin-top:4px;font-weight:700;color:#15803d');
             if (data.holding > 0) line(box, 'div', 'Adds about ' + fmt(job.extra_miles) + ' mi · ' + job.extra_minutes + ' min to your route', 'color:#475569');
-            if (data.can_take && typeof bridge.takeJob === 'function') {
+            if (job.offered) line(box, 'div', 'Offered to you: open Notifications (the bell) to accept or decline.', 'margin-top:8px;font-weight:700;color:#b45309');
+            else if (data.can_take && job.can_take !== false && typeof bridge.takeJob === 'function') {
                 const take = line(box, 'button', 'Take this job', 'margin-top:8px;width:100%;padding:10px;border:0;border-radius:6px;background:#2563eb;color:#fff;font-weight:600');
                 take.addEventListener('click', () => {
                     bridge.takeJob(Number(job.request_id));
@@ -83,10 +86,10 @@
         });
 
         jobs.forEach(job => {
-            const pin = L.marker([job.pickup_lat, job.pickup_lon], {icon: pinIcon}).addTo(all).bindPopup(() => jobPopup(job));
+            const pin = L.marker([job.pickup_lat, job.pickup_lon], {icon: job.offered ? offeredPinIcon : pinIcon}).addTo(all).bindPopup(() => jobPopup(job));
             const drop = L.circleMarker([job.dropoff_lat, job.dropoff_lon], {radius: 8, color: '#dc2626', fillColor: '#fff', fillOpacity: 1, weight: 4}).addTo(all).bindPopup(() => jobPopup(job));
             const path = roadLine(job.road) || [[job.pickup_lat, job.pickup_lon], [job.dropoff_lat, job.dropoff_lon]];
-            L.polyline(path, {color: '#dc2626', weight: 3, dashArray: '6,6', opacity: .8}).addTo(all);
+            L.polyline(path, {color: job.offered ? '#d97706' : '#dc2626', weight: 3, dashArray: '6,6', opacity: .8}).addTo(all);
             jobMarkers[job.request_id] = {pin: pin, bounds: L.latLngBounds(path)};
         });
 
@@ -127,7 +130,8 @@
             found.pin.openPopup();
         };
 
-        status.textContent = jobs.length ? 'Red pins: jobs you can take' + (orders.length ? ' · Numbers: your route' : '') : (orders.length ? 'Numbers: your route' : 'No jobs to show.');
+        const offeredCount = jobs.filter(j => j.offered).length, takeableCount = jobs.length - offeredCount;
+        status.textContent = jobs.length ? [takeableCount ? 'Red pins: jobs you can take' : '', offeredCount ? 'Amber pin: offered to you' : '', orders.length ? 'Numbers: your route' : ''].filter(Boolean).join(' · ') : (orders.length ? 'Numbers: your route' : 'No jobs to show.');
         window.addEventListener('resize', () => map.invalidateSize());
         // The page may not have its final size when it first draws: once it does, fit everything again (unless he already moved the map).
         let touched = false, settled = false;

@@ -1,6 +1,8 @@
 package com.huynhdous.employeefield.jobs;
 
 import android.graphics.Typeface;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -11,6 +13,7 @@ import com.huynhdous.employeefield.R;
 import com.huynhdous.employeefield.core.tab.TabModule;
 import com.huynhdous.employeefield.core.ui.Popup;
 import com.huynhdous.employeefield.core.ui.Theme;
+import com.huynhdous.employeefield.dispatch.DispatchEvents;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -29,6 +32,22 @@ public final class JobsTab extends TabModule {
     private JSONObject data = new JSONObject();
     private long readVersion;
     private boolean claiming;
+    /** How often the list reads the server again while this screen is showing. */
+    static final long AUTO_REFRESH_MS = 15000;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private LinearLayout shell;
+    private Runnable stopListening;
+    private String lastSignature = "";
+    /** How many times the map page was drawn (the automatic reads skip a redraw when nothing changed). */
+    int mapLoads;
+    private final Runnable auto = new Runnable() {
+        @Override
+        public void run() {
+            if (mapView == null) return;
+            if (shell != null && shell.isShown() && !claiming) load(false);
+            handler.postDelayed(this, AUTO_REFRESH_MS);
+        }
+    };
 
     @Override
     public String title() {
@@ -49,6 +68,11 @@ public final class JobsTab extends TabModule {
     @Override
     public void buildContent(LinearLayout content) {
         float density = density();
+        shell = content;
+        // The offer sound: refresh now (the order that was waiting is now offered to him) instead of at the next timer.
+        stopListening = DispatchEvents.listen(() -> {
+            if (mapView != null && shell != null && shell.isShown()) load(true);
+        });
         status = new TextView(context());
         status.setTextSize(13);
         status.setTextColor(Theme.TEXT_PRIMARY);
@@ -78,11 +102,18 @@ public final class JobsTab extends TabModule {
 
     @Override
     public void onShown() {
-        load();
+        load(true);
+        // While he looks at this screen the list is read again every few seconds, so a job that becomes available (or is offered to him) shows up by itself.
+        handler.removeCallbacks(auto);
+        handler.postDelayed(auto, AUTO_REFRESH_MS);
     }
 
     @Override
     public void onDetach() {
+        handler.removeCallbacks(auto);
+        if (stopListening != null) stopListening.run();
+        stopListening = null;
+        shell = null;
         if (mapView != null) {
             mapView.stopLoading();
             mapView.removeJavascriptInterface("AndroidBridge");
@@ -95,27 +126,59 @@ public final class JobsTab extends TabModule {
     }
 
     private void load() {
+        load(true);
+    }
+
+    /** {@code force} redraws the map even when nothing changed (the screen was just opened or the driver asked); automatic reads only redraw on a real change. */
+    private void load(boolean force) {
         if (mapView == null) return;
         long version = ++readVersion;
-        status.setText("Loading jobs…");
+        if (force) status.setText("Loading jobs…");
         try {
             host().request("dispatch/available", new JSONObject().put("token", host().token()), null, response -> {
                 if (version != readVersion || mapView == null) return;
-                render(response);
+                render(response, force);
             }, true, (code, message) -> {
-                if (version == readVersion && status != null) status.setText("Unable to load jobs. Open this screen again to retry.");
+                if (version == readVersion && status != null && force) status.setText("Unable to load jobs. Open this screen again to retry.");
                 return true;
             });
         } catch (Exception e) {
-            status.setText("Unable to load jobs.");
+            if (force) status.setText("Unable to load jobs.");
         }
     }
 
-    private void render(JSONObject response) {
+    /** What makes the picture different: the jobs (and whether each is offered or takeable), his orders, his place to about a kilometre, the pay shown. */
+    static String signature(JSONObject response) {
+        StringBuilder out = new StringBuilder();
+        JSONArray jobs = response.optJSONArray("jobs");
+        for (int i = 0; jobs != null && i < jobs.length(); i++) {
+            JSONObject job = jobs.optJSONObject(i);
+            if (job != null) out.append(job.optLong("request_id")).append(':').append(job.optBoolean("offered")).append(':').append(job.optBoolean("can_take")).append(':').append(job.optString("pay")).append(';');
+        }
+        JSONArray orders = response.optJSONArray("orders");
+        for (int i = 0; orders != null && i < orders.length(); i++) {
+            JSONObject order = orders.optJSONObject(i);
+            if (order != null) out.append("o").append(order.optString("offer_id")).append(':').append(order.optString("status")).append(';');
+        }
+        JSONArray position = response.optJSONArray("position");
+        if (position != null && position.length() == 2) out.append(String.format(java.util.Locale.US, "@%.2f,%.2f", position.optDouble(0), position.optDouble(1)));
+        return out.append('|').append(response.optBoolean("can_take")).append(response.optInt("holding")).append(response.optString("message")).toString();
+    }
+
+    private void render(JSONObject response, boolean force) {
         data = response;
         JSONArray jobs = response.optJSONArray("jobs");
         if (jobs == null) jobs = new JSONArray();
-        status.setText(JobText.statusLine(response.optBoolean("can_take"), jobs.length(), response.optInt("holding"), response.optInt("max_orders"), response.optString("message")));
+        int offered = 0;
+        for (int i = 0; i < jobs.length(); i++) if (jobs.optJSONObject(i) != null && jobs.optJSONObject(i).optBoolean("offered")) offered++;
+        int takeable = jobs.length() - offered;
+        String line = JobText.statusLine(response.optBoolean("can_take"), takeable, response.optInt("holding"), response.optInt("max_orders"), response.optString("message"));
+        if (offered > 0) line = (takeable == 0 ? "" : line + " ") + JobText.offeredLine(offered);
+        status.setText(line);
+        String signature = signature(response);
+        if (!force && signature.equals(lastSignature)) return;   // nothing changed: leave the map (and wherever he has panned or zoomed it) alone
+        lastSignature = signature;
+        mapLoads++;
         mapView.loadDataWithBaseURL("file:///android_asset/leaflet/", JobsMap.buildHtml(response), "text/html", "UTF-8", null);
         list.removeAllViews();
         for (int i = 0; i < jobs.length(); i++) {
@@ -134,6 +197,8 @@ public final class JobsTab extends TabModule {
         cardParams.topMargin = (int) (8 * density);
         list.addView(card, cardParams);
 
+        boolean offered = job.optBoolean("offered");
+        if (offered) card.addView(text("Offered to you", 12, true, 0xffb45309));
         card.addView(text(JobText.orderNumber(job.optString("title")), 15, true, Theme.TEXT_PRIMARY));
         card.addView(text("Pick up: " + job.optString("pickup_address"), 13, false, Theme.TEXT_PRIMARY));
         card.addView(text("Drop off: " + job.optString("dropoff_address"), 13, false, Theme.TEXT_PRIMARY));
@@ -141,7 +206,7 @@ public final class JobsTab extends TabModule {
         String earn = JobText.earnLine(job.optString("pay", ""));
         if (!earn.isEmpty()) card.addView(text(earn, 14, true, Theme.SUCCESS));
         boolean holding = data.optInt("holding") > 0;
-        if (holding) card.addView(text(JobText.extraLine(job.optDouble("extra_miles"), job.optInt("extra_minutes")), 12, false, Theme.TEXT_SECONDARY));
+        if (holding && !offered) card.addView(text(JobText.extraLine(job.optDouble("extra_miles"), job.optInt("extra_minutes")), 12, false, Theme.TEXT_SECONDARY));
 
         LinearLayout row = new LinearLayout(context());
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -151,7 +216,8 @@ public final class JobsTab extends TabModule {
             if (mapView != null) mapView.evaluateJavascript("if(window.focusJob)window.focusJob(" + job.optLong("request_id") + ");", null);
         });
         row.addView(show);
-        if (data.optBoolean("can_take")) {
+        if (offered) card.addView(text("Open Notifications (the bell) to accept or decline.", 12, false, Theme.TEXT_SECONDARY));
+        if (!offered && data.optBoolean("can_take")) {
             LinearLayout take = Theme.iconTextButton(context(), R.drawable.ic_job_complete, "Take this job", Theme.SUCCESS);
             take.setOnClickListener(v -> confirm(job));
             row.addView(take);
