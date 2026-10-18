@@ -16,7 +16,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * "Jobs": a map of the delivery jobs still waiting for a driver, for a driver who is on his way somewhere near a drop-off and decides to earn
+ * "Order Request": a map of the delivery jobs still waiting for a driver, for a driver who is on his way somewhere near a drop-off and decides to earn
  * extra. He taps a pin (or "Accept" in the list under the map), confirms, and the job becomes his order at once. The office decides
  * whether this is on and how far from him a job may be (Office Settings > Logistics); the server checks every rule again when he takes one.
  */
@@ -32,7 +32,7 @@ public final class JobsTab extends TabModule {
 
     @Override
     public String title() {
-        return "Jobs";
+        return "Order Request";
     }
 
     @Override
@@ -52,7 +52,7 @@ public final class JobsTab extends TabModule {
         status = new TextView(context());
         status.setTextSize(13);
         status.setTextColor(Theme.TEXT_PRIMARY);
-        status.setText("Loading jobs…");
+        status.setText("Loading order requests…");
         content.addView(status);
 
         LinearLayout card = new LinearLayout(context());
@@ -68,7 +68,7 @@ public final class JobsTab extends TabModule {
         mapView.setWebViewClient(new WebViewClient());
         com.huynhdous.employeefield.trip.TripMap.protectGestures(mapView);
         // Only ever loaded with our own bundled HTML/JS via loadDataWithBaseURL, never remote content, so exposing a JS interface is safe.
-        mapView.addJavascriptInterface(new JobsMap.Bridge(host(), mapView, this::load, this::takeFromMap), "AndroidBridge");
+        mapView.addJavascriptInterface(new JobsMap.Bridge(host(), mapView, this::load, this::takeFromMap, this::declineFromMap), "AndroidBridge");
         card.addView(mapView, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (int) (MAP_HEIGHT_DP * density)));
 
         list = new LinearLayout(context());
@@ -98,17 +98,17 @@ public final class JobsTab extends TabModule {
     private void load() {
         if (mapView == null) return;
         long version = ++readVersion;
-        status.setText("Loading jobs…");
+        status.setText("Loading order requests…");
         try {
             host().request("dispatch/available", new JSONObject().put("token", host().token()), null, response -> {
                 if (version != readVersion || mapView == null) return;
                 render(response);
             }, true, (code, message) -> {
-                if (version == readVersion && status != null) status.setText("Unable to load jobs. Open this screen again to retry.");
+                if (version == readVersion && status != null) status.setText("Unable to load order requests. Open this screen again to retry.");
                 return true;
             });
         } catch (Exception e) {
-            status.setText("Unable to load jobs.");
+            status.setText("Unable to load order requests.");
         }
     }
 
@@ -151,21 +151,57 @@ public final class JobsTab extends TabModule {
         LinearLayout row = new LinearLayout(context());
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout show = Theme.iconTextButton(context(), R.drawable.ic_tab_location, "Show on map", Theme.PRIMARY);
+        android.widget.ImageButton show = Theme.iconButton(context(), R.drawable.ic_tab_location, Theme.PRIMARY, "Show on map");
+        show.setTooltipText("Show on map");
         show.setOnClickListener(v -> {
             if (mapView != null) mapView.evaluateJavascript("if(window.focusJob)window.focusJob(" + job.optLong("request_id") + ");", null);
         });
-        row.addView(show);
-        if (offered ? job.optLong("offer_id") > 0 : data.optBoolean("can_take")) {
-            LinearLayout take = Theme.iconTextButton(context(), R.drawable.ic_job_complete, "Accept", Theme.SUCCESS);
-            take.setOnClickListener(v -> confirm(job));
-            LinearLayout.LayoutParams takeParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-            takeParams.leftMargin = (int) (10 * density);   // a gap between "Show on map" and "Accept"
-            row.addView(take, takeParams);
+        addAction(row,show);
+        if (offered ? job.optLong("offer_id") > 0 : data.optBoolean("can_take") && job.optBoolean("can_take",true)) {
+            android.widget.ImageButton take = Theme.iconButton(context(), R.drawable.ic_job_complete, Theme.SUCCESS, "Accept");
+            take.setTooltipText("Accept");take.setOnClickListener(v -> confirm(job));addAction(row,take);
         }
+        android.widget.ImageButton decline = Theme.iconButton(context(), R.drawable.ic_job_cancel, Theme.ERROR, "Decline");
+        decline.setTooltipText("Decline");decline.setOnClickListener(v -> confirmDecline(job));addAction(row,decline);
         LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         rowParams.topMargin = (int) (6 * density);
         card.addView(row, rowParams);
+    }
+
+    private void addAction(LinearLayout row, android.widget.ImageButton button) {
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams((int)(48*density()),(int)(48*density()));
+        if(row.getChildCount()>0)p.leftMargin=(int)(12*density());row.addView(button,p);
+    }
+
+    private void declineFromMap(long requestId) {
+        JSONArray jobs=data.optJSONArray("jobs");
+        for(int i=0;jobs!=null&&i<jobs.length();i++) {
+            JSONObject job=jobs.optJSONObject(i);
+            if(job!=null&&job.optLong("request_id")==requestId){confirmDecline(job);return;}
+        }
+    }
+
+    private void confirmDecline(JSONObject job) {
+        new Popup.Builder(context()).setTitle("Decline "+JobText.orderNumber(job.optString("title"))+"?")
+            .setMessage("This order request will remain available to other drivers.")
+            .setPositiveButton("Decline",(d,w)->decline(job)).setNegativeButton("Keep order request",null).show();
+    }
+
+    private void decline(JSONObject job) {
+        if(claiming)return;claiming=true;++readVersion;
+        try {
+            JSONObject body=new JSONObject().put("token",host().token());
+            boolean offered=job.optBoolean("offered");
+            if(offered)body.put("offer_id",job.optLong("offer_id")).put("decision","declined");
+            else body.put("request_id",job.optLong("request_id"));
+            host().request(offered?"dispatch/respond":"dispatch/decline",body,null,response->{
+                claiming=false;host().refreshDispatch();load();
+            },false,(code,message)->{
+                claiming=false;
+                new Popup.Builder(context()).setTitle("Can't decline this order request").setMessage(message).setPositiveButton("OK",null).show();
+                load();return true;
+            });
+        } catch(Exception e){claiming=false;throw new IllegalStateException(e);}
     }
 
     private TextView text(String value, int size, boolean bold, int color) {
@@ -206,12 +242,12 @@ public final class JobsTab extends TabModule {
                 claiming = false;
                 host().refreshDispatch();
                 load();
-                new Popup.Builder(context()).setTitle("It's yours").setMessage("The job is now one of your orders. Use the orders box at the top to start it.")
+                new Popup.Builder(context()).setTitle("It's yours").setMessage("The order request is now one of your orders. Use the orders box at the top to start it.")
                         .setPositiveButton("OK", null).show();
             }, false, (code, message) -> {
                 claiming = false;
                 if (code != 409 && code != 403) return false;
-                new Popup.Builder(context()).setTitle("Can't accept this job").setMessage(message).setPositiveButton("OK", null).show();
+                new Popup.Builder(context()).setTitle("Can't accept this order request").setMessage(message).setPositiveButton("OK", null).show();
                 load();
                 return true;
             });
@@ -230,12 +266,12 @@ public final class JobsTab extends TabModule {
                 claiming = false;
                 host().refreshDispatch();
                 load();
-                new Popup.Builder(context()).setTitle("It's yours").setMessage("The job is now one of your orders. Use the orders box at the top to start it.")
+                new Popup.Builder(context()).setTitle("It's yours").setMessage("The order request is now one of your orders. Use the orders box at the top to start it.")
                         .setPositiveButton("OK", null).show();
             }, false, (code, message) -> {
                 claiming = false;
                 if (code != 409 && code != 403) return false;
-                new Popup.Builder(context()).setTitle("Can't accept this job").setMessage(message).setPositiveButton("OK", null).show();
+                new Popup.Builder(context()).setTitle("Can't accept this order request").setMessage(message).setPositiveButton("OK", null).show();
                 load();
                 return true;
             });

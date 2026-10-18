@@ -78,12 +78,15 @@ public class ActiveJobControlTest {
     @Test public void severalOrdersEachGetTheirOwnControlsAndTheRouteIsListedInOrder()throws Exception {
         ActiveJobControl control=control();reply(0,threeOrders());
         List<String> shown=texts(control);
-        assertTrue(shown.contains("Your delivery requests (3)"));assertTrue(shown.contains("Suggested route"));
+        assertTrue(shown.contains("Your order requests (3)"));assertTrue(shown.contains("Suggested route"));
         assertTrue(shown.contains("Order A")&&shown.contains("Order B")&&shown.contains("Order C"));
         assertEquals(2,withLabel(control,"On the way").size());assertEquals(1,withLabel(control,"Arrived").size());
-        assertEquals(3,withLabel(control,"Cancel job").size());assertEquals(1,withLabel(control,"Refresh").size());
-        int first=shown.indexOf("Pick up · Order B"),last=shown.indexOf("Deliver · Order A");
+        assertEquals(3,withLabel(control,"Cancel order request").size());assertEquals(1,withLabel(control,"Refresh").size());
+        int first=shown.indexOf("Go to pickup · Order B"),last=shown.indexOf("Deliver · Order A");
         assertTrue(first>=0&&last>first);
+        assertTrue(shown.contains("Follow these stops in order:"));
+        assertTrue(shown.contains("Go to pickup · Order A")&&shown.contains("Go to pickup · Order C"));
+        for(int n=1;n<=6;n++) assertTrue(shown.contains(String.valueOf(n)));
         assertTrue(shown.indexOf("Deliver · Order B")<shown.indexOf("Deliver · Order C")&&shown.indexOf("Deliver · Order C")<last);
         assertTrue(shown.contains("About 14.5 mi · 42 min · 6 stops (straight lines, an estimate)"));   // a server answer with no source is a straight-line plan
         assertEquals("by road, no live traffic", ActiveJobControl.routeNote("road"));
@@ -96,7 +99,7 @@ public class ActiveJobControlTest {
         ActiveJobControl control=control();
         reply(0,new JSONObject().put("dispatch_enabled",true).put("active_jobs",new org.json.JSONArray().put(order("1","Order A","accepted"))).put("route",JSONObject.NULL));
         List<String> shown=texts(control);
-        assertTrue(shown.contains("Current delivery request"));assertFalse(shown.contains("Suggested route"));
+        assertTrue(shown.contains("Current order request"));assertFalse(shown.contains("Suggested route"));
         assertEquals(1,withLabel(control,"Refresh").size());assertEquals(1,withLabel(control,"On the way").size());
     }
     @Test public void deliveryDepartureSkipsArrivalAndSendsPickedUpStage()throws Exception {
@@ -129,7 +132,7 @@ public class ActiveJobControlTest {
             assertTrue("Caption is not cut by column",caption.getBottom()<=column.getHeight());
             android.view.ViewGroup row=(android.view.ViewGroup)column.getParent();
             assertTrue("Actions stay within card",row.getWidth()<=width);
-            assertNotNull(button(control,"Cancel job"));assertNotNull(button(control,"Refresh"));
+            assertNotNull(button(control,"Cancel order request"));assertNotNull(button(control,"Refresh"));
         }
     }
 
@@ -141,7 +144,7 @@ public class ActiveJobControlTest {
             assertNotNull(step[1],button(control,step[1]));
         }
         ActiveJobControl service=control();reply(requests.size()-1,status("accepted"));
-        assertNotNull("a service job keeps the plain wording",button(service,"On the way"));
+        assertNotNull("a service order request keeps the plain wording",button(service,"On the way"));
         assertNull(button(service,"To pickup"));
     }
     @Test public void deliveredOnADeliveryOffersAPhotoOrNone()throws Exception {
@@ -188,13 +191,13 @@ public class ActiveJobControlTest {
     }
     @Test public void cancellingOneOfSeveralKeepsTheOthersAndResyncs()throws Exception {
         ActiveJobControl control=control();reply(0,threeOrders());
-        withLabel(control,"Cancel job").get(0).performClick();
+        withLabel(control,"Cancel order request").get(0).performClick();
         ((com.huynhdous.employeefield.core.ui.Popup)org.robolectric.shadows.ShadowDialog.getLatestDialog()).getButton(com.huynhdous.employeefield.core.ui.Popup.BUTTON_POSITIVE).performClick();
         org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle();
         assertEquals("dispatch/release",requests.get(1)[0]);assertEquals("1",((JSONObject)requests.get(1)[1]).getString("offer_id"));
         reply(1,new JSONObject().put("offer_id",1).put("status","declined"));
         List<String> shown=texts(control);
-        assertTrue(shown.contains("Your delivery requests (2)"));assertFalse(shown.contains("Order A"));assertEquals("dispatch/status",requests.get(2)[0]);
+        assertTrue(shown.contains("Your order requests (2)"));assertFalse(shown.contains("Order A"));assertEquals("dispatch/status",requests.get(2)[0]);
     }
     @Test public void completingOneOfSeveralRemovesItAndResyncs()throws Exception {
         ActiveJobControl control=control();
@@ -205,6 +208,6 @@ public class ActiveJobControlTest {
         reply(1,new JSONObject().put("job",order("1","Order A","completed")));
         assertEquals("dispatch/status",requests.get(2)[0]);
         List<String> shown=texts(control);
-        assertTrue(shown.contains("Current delivery request"));assertTrue(shown.contains("Order B"));assertFalse(shown.contains("Order A"));
+        assertTrue(shown.contains("Current order request"));assertTrue(shown.contains("Order B"));assertFalse(shown.contains("Order A"));
     }
 }

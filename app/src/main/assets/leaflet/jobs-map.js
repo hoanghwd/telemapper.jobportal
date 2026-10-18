@@ -9,6 +9,8 @@
         map.setView((jobsData && jobsData.position) || [20, 0], jobsData && jobsData.position ? 12 : 2);
         L.tileLayer(APP_CONFIG.tileUrl, {maxZoom: 19, attribution: APP_CONFIG.attribution}).addTo(map);
         const bridge = window.AndroidBridge || {};
+        map.on('popupopen', () => map.getContainer().classList.add('job-popup-open'));
+        map.on('popupclose', () => map.getContainer().classList.remove('job-popup-open'));
         const all = L.featureGroup().addTo(map);
         const jobMarkers = {};
         const data = jobsData || {};
@@ -60,19 +62,18 @@
             line(box, 'div', fmt(job.miles_to_pickup) + ' mi' + mins(job.minutes_to_pickup) + ' to the pickup · trip ' + fmt(job.trip_miles) + ' mi' + mins(job.trip_minutes), 'margin-top:4px;color:#475569');
             if (job.pay !== null && job.pay !== undefined && job.pay !== '') line(box, 'div', 'Pay: $' + job.pay, 'margin-top:4px;font-weight:700;color:#15803d');
             if (data.holding > 0) line(box, 'div', 'Adds about ' + fmt(job.extra_miles) + ' mi · ' + job.extra_minutes + ' min to your route', 'color:#475569');
-            // An offered order is accepted (answered as the offer); a waiting one he can take is claimed. Both read "Accept".
-            if ((job.offered ? job.offer_id : data.can_take && job.can_take !== false) && typeof bridge.takeJob === 'function') {
-                // The ring is only where the order is collected: the job is accepted from its drop-off (the pin), never from the ring.
-                if (where !== 'dropoff') {
-                    line(box, 'div', 'To accept, tap the pin (the delivery address).', 'margin-top:8px;font-weight:700;color:#475569');
-                    return box;
-                }
-                const take = line(box, 'button', 'Accept', 'margin-top:8px;width:100%;padding:10px;border:0;border-radius:6px;background:#2563eb;color:#fff;font-weight:600');
-                take.addEventListener('click', () => {
-                    bridge.takeJob(Number(job.request_id));
-                    map.closePopup();
-                });
-            }
+            const actions = document.createElement('div');actions.className = 'job-actions';box.appendChild(actions);
+            const action = (label, path, color, handler) => {
+                const button = document.createElement('button');button.type = 'button';
+                button.title = label;button.setAttribute('aria-label', label);button.style.color = color;
+                button.innerHTML = '<svg viewBox="0 0 24 24"><path d="' + path + '"/></svg>';
+                button.addEventListener('click', handler);actions.appendChild(button);
+            };
+            action('Show on map','M12 21s-6-5-6-10a6 6 0 0 1 12 0c0 5-6 10-6 10Z M10 11h4','#2563eb',()=>{map.closePopup();window.focusJob(job.request_id);});
+            if ((job.offered ? job.offer_id : data.can_take && job.can_take !== false) && typeof bridge.takeJob === 'function')
+                action('Accept','M5 12l4 4L19 6','#15803d',()=>{bridge.takeJob(Number(job.request_id));map.closePopup();});
+            if(typeof bridge.declineJob === 'function')
+                action('Decline','M6 6l12 12M18 6L6 18','#dc2626',()=>{bridge.declineJob(Number(job.request_id));map.closePopup();});
             return box;
         };
 
@@ -92,9 +93,11 @@
             L.circleMarker([o.dropoff_lat, o.dropoff_lon], {radius: 9, color: '#fff', fillColor: '#16a34a', fillOpacity: 1, weight: 3}).addTo(all).bindPopup('Deliver ' + orderName(o.title).replace(/</g, '&lt;'));
         });
 
+        const popupOptions = () => ({maxWidth: Math.max(120, Math.min(280, map.getSize().x - 56)), minWidth: 100,
+            maxHeight: Math.max(100, map.getSize().y - 70), autoPanPadding: [12, 12], keepInView: true});
         jobs.forEach(job => {
-            const pin = L.marker([job.dropoff_lat, job.dropoff_lon], {icon: job.offered ? offeredPinIcon : pinIcon}).addTo(all).bindPopup(() => jobPopup(job, 'dropoff'));
-            const pickupRing = L.circleMarker([job.pickup_lat, job.pickup_lon], {radius: 8, color: job.offered ? '#d97706' : '#dc2626', fillColor: '#fff', fillOpacity: 1, weight: 4}).addTo(all).bindPopup(() => jobPopup(job, 'pickup'));
+            const pin = L.marker([job.dropoff_lat, job.dropoff_lon], {icon: job.offered ? offeredPinIcon : pinIcon}).addTo(all).bindPopup(() => jobPopup(job, 'dropoff'), popupOptions());
+            const pickupRing = L.circleMarker([job.pickup_lat, job.pickup_lon], {radius: 8, color: job.offered ? '#d97706' : '#dc2626', fillColor: '#fff', fillOpacity: 1, weight: 4}).addTo(all).bindPopup(() => jobPopup(job, 'pickup'), popupOptions());
             const path = roadLine(job.road) || [[job.pickup_lat, job.pickup_lon], [job.dropoff_lat, job.dropoff_lon]];
             L.polyline(path, {color: job.offered ? '#d97706' : '#dc2626', weight: 3, dashArray: '6,6', opacity: .8}).addTo(all);
             jobMarkers[job.request_id] = {pin: pin, bounds: L.latLngBounds(path)};
@@ -146,13 +149,13 @@
             const parts = [legendPin(color) + ' Pin = delivery address', legendRing(color) + ' Ring = pickup'];
             if (orders.length) parts.push('Numbers: your route');
             status.innerHTML = parts.join(' &nbsp;·&nbsp; ');
-        } else status.textContent = orders.length ? 'Numbers: your route' : 'No jobs to show.';
+        } else status.textContent = orders.length ? 'Numbers: your route' : 'No order requests to show.';
         window.addEventListener('resize', () => map.invalidateSize());
         // The page may not have its final size when it first draws: once it does, fit everything again (unless he already moved the map).
         let touched = false, settled = false;
         map.on('dragstart zoomstart', () => { if (settled) touched = true; });
         setTimeout(() => { map.invalidateSize(); if (!touched) fit(); setTimeout(() => { settled = true; }, 800); }, 150);
     } catch (e) {
-        status.textContent = 'Unable to draw the jobs map: ' + e.message;
+        status.textContent = 'Unable to draw the order request map: ' + e.message;
     }
 })();

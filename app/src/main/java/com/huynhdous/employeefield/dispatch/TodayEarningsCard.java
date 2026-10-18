@@ -34,7 +34,7 @@ public final class TodayEarningsCard {
         view.setOrientation(LinearLayout.VERTICAL);
 
         view.setVisibility(View.GONE);
-        view.setOnClickListener(v -> { if (data != null) showList(false); });
+        view.setOnClickListener(v -> { if (data != null) showDetails(); });
         refresh();
     }
 
@@ -77,17 +77,33 @@ public final class TodayEarningsCard {
         view.removeAllViews();
         if (data == null || !data.optBoolean("dispatch_enabled")) { view.setVisibility(View.GONE); return; }
         view.setVisibility(View.VISIBLE);
-        addCard(data,false);
+        view.setOrientation(LinearLayout.HORIZONTAL);
         JSONObject week=data.optJSONObject("week");
-        if(week!=null)addCard(week,true);
+        if(week!=null)addSummary(week,"Weekly");
+        addSummary(data,"Today's");
     }
 
-    private void addCard(JSONObject period,boolean weekly) {
+    private void addSummary(JSONObject period,String label) {
+        TextView summary=line(label+": "+money(period.optString("earned","0.00"),period.optString("currency","USD")),15,true,Theme.TEXT_PRIMARY,0);
+        summary.setPadding(dp(12),dp(12),dp(12),dp(12));summary.setBackground(Theme.cardBackground(host.activity()));
+        summary.setContentDescription(label+" earnings. Tap for details");summary.setOnClickListener(v->showDetails());
+        LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f);
+        if(view.getChildCount()>0)p.leftMargin=dp(8);view.addView(summary,p);
+    }
+
+    private void showDetails() {
+        LinearLayout details=new LinearLayout(host.activity());details.setOrientation(LinearLayout.VERTICAL);
+        details.setPadding(dp(24),dp(4),dp(24),dp(4));
+        addCard(details,data,false);JSONObject week=data.optJSONObject("week");if(week!=null)addCard(details,week,true);
+        new Popup.Builder(host.activity()).setTitle("Earnings details").setView(details).setPositiveButton("Close",null).show();
+    }
+
+    private void addCard(LinearLayout parent,JSONObject period,boolean weekly) {
         LinearLayout card=new LinearLayout(host.activity());card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(16),dp(16),dp(16),dp(16));card.setBackground(Theme.cardBackground(host.activity()));
         card.setOnClickListener(v->showList(weekly));
         LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT);
-        if(weekly)params.topMargin=dp(10);view.addView(card,params);
+        if(weekly)params.topMargin=dp(10);parent.addView(card,params);
         String currency=period.optString("currency","USD");
         card.addView(line(weekly?"This week's earnings":"Today's earnings",13,false,Theme.TEXT_SECONDARY,0));
         if(weekly) {

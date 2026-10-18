@@ -18,11 +18,12 @@ import org.json.JSONObject;
 
 /**
  * "Trip": the day's recorded GPS trail on a map (blue trail, green assigned territory, door outcomes), for any date. A tap on a trail dot
- * can start a door there. The map stretches to fill the screen so the Refresh / Where am I buttons sit just above the bottom, and
+ * can start a door there. The map is 1.5 times its fitted height, with page scrolling when needed, and
  * "Where am I" drops a green dot on the employee's fresh position. A line at the top says whether location tracking is on (with a button to
  * turn it on when the permission is missing).
  */
 public final class TripTab extends TabModule {
+    private static final float MAP_HEIGHT_SCALE = 1.5f;
     private LinearLayout content;
     private android.webkit.WebView mapView;
     private TextView status;
@@ -103,12 +104,13 @@ public final class TripTab extends TabModule {
         mapView = new android.webkit.WebView(context());
         mapView.getSettings().setJavaScriptEnabled(true);
         mapView.setWebViewClient(new android.webkit.WebViewClient());
+        TripMap.protectGestures(mapView);
         // Only ever loaded with our own bundled HTML/JS via loadDataWithBaseURL, never remote/untrusted content, so exposing a JS interface is safe.
         mapView.addJavascriptInterface(new TripMap.Bridge(host(), mapView, this::load), "AndroidBridge");
-        LinearLayout.LayoutParams mapParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (int) (320 * density));
+        LinearLayout.LayoutParams mapParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Math.round(320 * density * MAP_HEIGHT_SCALE));
         card.addView(mapView, mapParams);
 
-        // The map takes whatever height is left, down to just above the bottom of the screen (re-fitted whenever the layout changes).
+        // Use 1.5 times the fitted map height, with page scrolling when it extends below the screen.
         fitListener = this::fitMapToScreen;
         content.getViewTreeObserver().addOnGlobalLayoutListener(fitListener);
     }
@@ -172,8 +174,7 @@ public final class TripTab extends TabModule {
         status.setText(points.length() + " position" + (points.length() == 1 ? "" : "s") + " recorded on " + dateLabel().replace("Trip date: ", ""));
     }
 
-    /** Stretches the map so the buttons below it end just above the bottom of the screen: the room left in the scroll area, minus what
-     * sits above the map and the card padding / button row / panel padding below it. */
+    /** Uses 1.5 times the previous fitted height, retaining its minimum/maximum sizing before scaling. */
     private void fitMapToScreen() {
         if (mapView == null || content == null || content.getVisibility() != View.VISIBLE) return;
         ScrollView scroll = null;
@@ -193,7 +194,7 @@ public final class TripTab extends TabModule {
         LinearLayout card = (LinearLayout) mapView.getParent();
         int below = card.getPaddingBottom() + scrollContent.getPaddingBottom();
         int available = scroll.getHeight() - scroll.getPaddingTop() - scroll.getPaddingBottom() - top - below;
-        int target = Math.max((int) (240 * density), Math.min(available, (int) (900 * density)));
+        int target = Math.round(Math.max((int) (240 * density), Math.min(available, (int) (900 * density))) * MAP_HEIGHT_SCALE);
         ViewGroup.LayoutParams params = mapView.getLayoutParams();
         if (Math.abs(params.height - target) > (int) density) {
             params.height = target;

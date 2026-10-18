@@ -60,6 +60,8 @@ public class JobsTabTest {
         if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++)walk(((ViewGroup)v).getChildAt(i),out);
     }
 
+    List<View> actions(String label) {List<View> found=new ArrayList<>();find(content,label,found);return found;}
+    void find(View v,String label,List<View> found){if(label.contentEquals(v.getContentDescription()==null?"":v.getContentDescription()))found.add(v);if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++)find(((ViewGroup)v).getChildAt(i),label,found);}
     @Test public void showingTheScreenReadsTheListOnceAndNothingReloadsItByItself()throws Exception {
         open();tab.onShown();
         assertEquals(1,requests.size());assertEquals("dispatch/available",requests.get(0)[0]);
@@ -78,14 +80,31 @@ public class JobsTabTest {
         reply(0,answer(job(7,true),job(8,false)));
         List<String> shown=texts();
         assertFalse("no 'offered to you' wording",shown.toString().toLowerCase().contains("offered"));
-        assertEquals("both the waiting job and the offered one have an Accept button",2,java.util.Collections.frequency(shown,"Accept"));
-        assertEquals("2 jobs you can take. Tap the pin, or Accept below.",shown.get(0));
+        assertEquals("both the waiting order request and the offered one have an Accept button",2,actions("Accept").size());
+        assertEquals("2 order requests you can take. Tap the pin, or Accept below.",shown.get(0));
     }
     @Test public void whenOnlyAnOfferedOrderIsThereItIsStillAJobHeCanAccept()throws Exception {
         open();tab.onShown();
         reply(0,answer(job(7,true)));
         String status=texts().get(0);
-        assertEquals("1 job you can take. Tap the pin, or Accept below.",status);
-        assertEquals("the offered order is accepted from here",1,java.util.Collections.frequency(texts(),"Accept"));
+        assertEquals("1 order request you can take. Tap the pin, or Accept below.",status);
+        assertEquals("the offered order is accepted from here",1,actions("Accept").size());
+    }
+
+    @Test public void cardsHaveAccessibleMapAcceptAndDeclineIconsAndWaitingDeclinesUseRequestId()throws Exception {
+        open();tab.onShown();reply(0,answer(job(8,false)));
+        assertEquals(1,actions("Show on map").size());assertEquals(1,actions("Accept").size());assertEquals(1,actions("Decline").size());
+        actions("Decline").get(0).performClick();
+        com.huynhdous.employeefield.core.ui.Popup dialog=(com.huynhdous.employeefield.core.ui.Popup)org.robolectric.shadows.ShadowDialog.getLatestDialog();
+        dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();
+        assertEquals("dispatch/decline",requests.get(1)[0]);assertEquals(8,((JSONObject)requests.get(1)[1]).getLong("request_id"));
+        reply(1,new JSONObject().put("success",true));assertEquals("dispatch/available",requests.get(2)[0]);
+    }
+    @Test public void offeredDeclineAnswersTheOfferAndAcceptStillUsesItsOfferId()throws Exception {
+        open();tab.onShown();reply(0,answer(job(7,true)));
+        actions("Decline").get(0).performClick();
+        com.huynhdous.employeefield.core.ui.Popup dialog=(com.huynhdous.employeefield.core.ui.Popup)org.robolectric.shadows.ShadowDialog.getLatestDialog();
+        dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();
+        JSONObject body=(JSONObject)requests.get(1)[1];assertEquals("dispatch/respond",requests.get(1)[0]);assertEquals("declined",body.getString("decision"));assertEquals(507,body.getLong("offer_id"));
     }
 }

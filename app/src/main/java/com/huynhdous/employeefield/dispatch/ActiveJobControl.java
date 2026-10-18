@@ -118,7 +118,7 @@ public final class ActiveJobControl {
         view.removeAllViews();view.setVisibility(jobs.length()==0?View.GONE:View.VISIBLE);
         if(jobs.length()==0)return;
         boolean several=jobs.length()>1;
-        text(several?"Your delivery requests ("+jobs.length()+")":"Current delivery request",18);
+        text(several?"Your order requests ("+jobs.length()+")":"Current order request",18);
         if(several) renderRoute();
         for(int i=0;i<jobs.length();i++) {
             JSONObject job=jobs.optJSONObject(i);
@@ -154,7 +154,7 @@ public final class ActiveJobControl {
                     .setPositiveButton("Take photo",(dialog,which)->deliveryPhoto.deliver(job.optString("id")))
                     .setNeutralButton("No photo",(dialog,which)->advance(job,next,advance))
                     .setNegativeButton("Cancel",null).show();
-                else if(next.equals("completed"))new AlertDialog.Builder(host.activity()).setTitle(job.optBoolean("delivery")?"Delivered?":"Complete job?")
+                else if(next.equals("completed"))new AlertDialog.Builder(host.activity()).setTitle(job.optBoolean("delivery")?"Delivered?":"Complete order request?")
                     .setMessage(job.optBoolean("delivery")?"Confirm the order was handed to the customer.":"Confirm the work is finished.").setPositiveButton(job.optBoolean("delivery")?"Delivered":"Complete",(dialog,which)->advance(job,next,advance))
                     .setNegativeButton("Cancel",null).show();
                 else advance(job,next,advance);
@@ -163,10 +163,10 @@ public final class ActiveJobControl {
         String status=job.optString("status");
         // A driver can hand a job back until the work starts; the dispatcher then offers it to the next driver.
         if("accepted".equals(status)||"on_the_way".equals(status)||"arrived".equals(status)) {
-            ImageButton giveUp=action(actions,R.drawable.ic_job_cancel,Theme.ERROR,false,"Cancel job");
-            giveUp.setOnClickListener(v->new Popup.Builder(host.activity()).setTitle("Cancel this job?")
-                .setMessage("It will be offered to another driver, and you won't be offered this job again for a while. You can't cancel once the work has started.")
-                .setPositiveButton("Cancel job",(dialog,which)->release(job,giveUp)).setNegativeButton("Keep job",null).show());
+            ImageButton giveUp=action(actions,R.drawable.ic_job_cancel,Theme.ERROR,false,"Cancel order request");
+            giveUp.setOnClickListener(v->new Popup.Builder(host.activity()).setTitle("Cancel this order request?")
+                .setMessage("It will be offered to another driver, and you won't be offered this order request again for a while. You can't cancel once the work has started.")
+                .setPositiveButton("Cancel order request",(dialog,which)->release(job,giveUp)).setNegativeButton("Keep order request",null).show());
         }
         if(!several) action(actions,R.drawable.ic_refresh,Theme.NEUTRAL,false,"Refresh").setOnClickListener(v->refresh());
     }
@@ -182,6 +182,7 @@ public final class ActiveJobControl {
         JSONArray stops=route==null?null:route.optJSONArray("stops");
         if(stops==null||stops.length()==0) return;
         view.addView(line("Suggested route",15,true,Theme.PRIMARY,4,2));
+        view.addView(line("Follow these stops in order:",14,false,Theme.TEXT_PRIMARY,0,4));
         view.addView(line("About "+route.optString("miles")+" mi · "+route.optString("minutes")+" min · "+stops.length()+" stops ("+routeNote(route.optString("source"))+")",12,false,Theme.TEXT_SECONDARY,0,8));
         for(int i=0;i<stops.length();i++) {
             JSONObject stop=stops.optJSONObject(i);
@@ -192,7 +193,7 @@ public final class ActiveJobControl {
             GradientDrawable circle=new GradientDrawable();circle.setShape(GradientDrawable.OVAL);circle.setColor("pickup".equals(stop.optString("type"))?Theme.PRIMARY:Theme.SUCCESS);number.setBackground(circle);
             row.addView(number,new LinearLayout.LayoutParams(dp(26),dp(26)));
             LinearLayout words=new LinearLayout(host.activity());words.setOrientation(LinearLayout.VERTICAL);
-            words.addView(line(("pickup".equals(stop.optString("type"))?"Pick up · ":"Deliver · ")+stop.optString("title"),14,true,Theme.TEXT_PRIMARY,0,0));
+            words.addView(line(("pickup".equals(stop.optString("type"))?"Go to pickup · ":"Deliver · ")+stop.optString("title"),14,true,Theme.TEXT_PRIMARY,0,0));
             words.addView(line(stop.optString("address")+" · "+stop.optString("miles")+" mi",12,false,Theme.TEXT_SECONDARY,0,0));
             LinearLayout.LayoutParams wordsParams=new LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f);wordsParams.leftMargin=dp(10);
             row.addView(words,wordsParams);
@@ -220,7 +221,7 @@ public final class ActiveJobControl {
         ++readVersion; // Ignore reads started before this mutation.
         try { host.request("dispatch/release",new JSONObject().put("token",session.token).put("offer_id",job.getString("id")),null,response->{
                 updating=false;++readVersion;boolean moreLeft=drop(job.optString("id"));render();changed.run();
-                new Popup.Builder(host.activity()).setTitle("Job cancelled")
+                new Popup.Builder(host.activity()).setTitle("Order request cancelled")
                     .setMessage("It will be offered to another driver. You can receive another offer when Ready.").setPositiveButton("OK",null).show();
                 if(moreLeft) refresh();
             },false,(code,message)->{updating=false;button.setEnabled(true);if(code==409||code==403)refresh();return false;});
@@ -236,7 +237,7 @@ public final class ActiveJobControl {
                 boolean completed="completed".equals(updated.optString("status")),moreLeft=false;
                 if(completed) moreLeft=drop(updated.optString("id")); else update(updated);
                 render();changed.run();
-                if(completed) new AlertDialog.Builder(host.activity()).setMessage((updated.optBoolean("delivery")?"Delivery completed":"Job completed")+". You can receive another offer when Ready.").setPositiveButton("OK",null).show();
+                if(completed) new AlertDialog.Builder(host.activity()).setMessage((updated.optBoolean("delivery")?"Delivery completed":"Order request completed")+". You can receive another offer when Ready.").setPositiveButton("OK",null).show();
                 if(moreLeft) refresh();
             },false,(code,message)->{updating=false;button.setEnabled(true);if(code==409||code==403)refresh();return false;});
         } catch(Exception e) { throw new IllegalStateException(e); }

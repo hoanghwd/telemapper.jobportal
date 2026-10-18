@@ -45,8 +45,8 @@ final class JobText {
 
     /** The line above the map: what is there to take, or why nothing is. */
     static String statusLine(boolean canTake, int jobs, int holding, int maxOrders, String message) {
-        if (jobs == 0) return message == null || message.isEmpty() ? "No jobs are waiting near you right now." : message;
-        if (!canTake) return jobs + (jobs == 1 ? " job is" : " jobs are") + " waiting, but you already hold the most orders (" + maxOrders + ").";
-        return jobs + (jobs == 1 ? " job you can take" : " jobs you can take") + (holding > 0 ? " on top of your orders." : ".") + " Tap the pin, or Accept below.";
+        if (jobs == 0) return message == null || message.isEmpty() ? "No order requests are waiting near you right now." : message;
+        if (!canTake) return jobs + (jobs == 1 ? " order request is" : " order requests are") + " waiting, but you already hold the most orders (" + maxOrders + ").";
+        return jobs + (jobs == 1 ? " order request you can take" : " order requests you can take") + (holding > 0 ? " on top of your orders." : ".") + " Tap the pin, or Accept below.";
     }
 }

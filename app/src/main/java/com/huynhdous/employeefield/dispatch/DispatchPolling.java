@@ -48,7 +48,7 @@ public final class DispatchPolling {
             if (!token.equals(TrackingService.activeToken) || SessionWork.hasEnded(token)) return;
             lastReady = ready; pendingUnavailable = false; retry = 15;
             interval = Math.max(5, Math.min(300, response.optInt("poll_interval_seconds", 15)));
-            status = "busy".equals(response.optString("availability")) ? "Job accepted — busy" : ready ? "Ready — waiting for work" : "Unavailable for service work";
+            status = "busy".equals(response.optString("availability")) ? "Order request accepted — busy" : ready ? "Ready — waiting for work" : "Unavailable for service work";
             InboxActions inbox = new InboxActions(context, employee);
             inbox.setWorkOffersEnabled(response.optBoolean("job_offers_enabled", false));
             JSONObject offer = response.optJSONObject("pending_offer");

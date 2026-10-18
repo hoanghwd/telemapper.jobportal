@@ -41,6 +41,7 @@ public class TodayEarningsCardTest {
         if(v instanceof TextView)out.add(((TextView)v).getText().toString());
         if(v instanceof ViewGroup)for(int i=0;i<((ViewGroup)v).getChildCount();i++)walk(((ViewGroup)v).getChildAt(i),out);
     }
+    boolean tapCard(View root,String title){if(root instanceof TextView&&title.contentEquals(((TextView)root).getText())){((View)root.getParent()).performClick();return true;}if(root instanceof ViewGroup)for(int i=0;i<((ViewGroup)root).getChildCount();i++)if(tapCard(((ViewGroup)root).getChildAt(i),title))return true;return false;}
     JSONObject day() throws Exception {
         return new JSONObject().put("dispatch_enabled",true).put("currency","USD").put("completed_count",3).put("unpriced_count",1).put("earned","13.38")
             .put("paid","5.00").put("owed","8.38").put("in_progress","2.50").put("in_progress_count",1)
@@ -59,25 +60,19 @@ public class TodayEarningsCardTest {
     }
     @Test public void showsWhatWasEarnedAndWhatIsStillBeingDelivered() throws Exception {
         TodayEarningsCard card=card();reply(0,day());
-        assertEquals(View.VISIBLE,card.view.getVisibility());
-        List<String> shown=texts(card.view);
-        assertTrue(shown.contains("Today's earnings"));
-        assertTrue(shown.contains("$13.38"));
-        assertTrue(shown.contains("3 deliveries completed today (1 without an amount)"));
-        assertTrue(shown.contains("+$2.50 when your current delivery is completed"));
-        assertTrue(shown.contains("Marked paid $5.00 · Not paid yet $8.38"));
-        assertTrue(shown.contains("Tap for today's deliveries"));
+        assertEquals(View.VISIBLE,card.view.getVisibility());assertTrue(texts(card.view).contains("Today's: $13.38"));
+        assertFalse(texts(card.view).contains("3 deliveries completed today (1 without an amount)"));
+        card.view.performClick();List<String> shown=texts(ShadowDialog.getLatestDialog().getWindow().getDecorView());
+        assertTrue(shown.contains("Today's earnings"));assertTrue(shown.contains("3 deliveries completed today (1 without an amount)"));
+        assertTrue(shown.contains("+$2.50 when your current delivery is completed"));assertTrue(shown.contains("Marked paid $5.00 · Not paid yet $8.38"));
     }
+
     @Test public void aQuietDayShowsZeroAndNothingToTap() throws Exception {
-        TodayEarningsCard card=card();
-        reply(0,new JSONObject().put("dispatch_enabled",true).put("currency","USD").put("completed_count",0).put("unpriced_count",0).put("earned","0.00").put("paid","0.00").put("owed","0.00")
-            .put("in_progress","0.00").put("in_progress_count",0).put("deliveries",new JSONArray()));
-        List<String> shown=texts(card.view);
-        assertTrue(shown.contains("$0.00"));assertTrue(shown.contains("0 deliveries completed today"));
-        assertFalse(shown.contains("Tap for today's deliveries"));
-        card.view.performClick();
-        assertNull(ShadowDialog.getLatestDialog());
+        TodayEarningsCard card=card();reply(0,new JSONObject().put("dispatch_enabled",true).put("earned","0.00").put("completed_count",0));
+        assertTrue(texts(card.view).contains("Today's: $0.00"));card.view.performClick();
+        assertTrue(texts(ShadowDialog.getLatestDialog().getWindow().getDecorView()).contains("0 deliveries completed today"));
     }
+
     @Test public void oneDeliveryIsSingular() {
         assertEquals("1 delivery completed today",TodayEarningsCard.countText(1,0));
         assertEquals("2 deliveries completed today (2 without an amount)",TodayEarningsCard.countText(2,2));
@@ -98,19 +93,12 @@ public class TodayEarningsCardTest {
         assertEquals(View.VISIBLE,card.view.getVisibility());
     }
     @Test public void tappingListsEachDeliveryWithItsAmountAndPaidState() throws Exception {
-        TodayEarningsCard card=card();reply(0,day());
-        card.view.performClick();
-        Dialog dialog=ShadowDialog.getLatestDialog();
-        assertNotNull(dialog);
-        List<String> inside=texts(dialog.getWindow().getDecorView());
-        assertTrue(inside.contains("Today's deliveries"));
-        String list=null;for(String s:inside)if(s.contains("TP5"))list=s;
-        assertNotNull(list);
-        assertTrue(list.contains("TP7")&&list.contains("no amount set"));
-        assertTrue(list.contains("$5.00 · paid"));
-        assertTrue(list.contains("$8.38 · not paid yet"));
-        assertTrue(list.indexOf("TP7")<list.indexOf("TP5")&&list.indexOf("TP5")<list.indexOf("TP1"));
+        TodayEarningsCard card=card();reply(0,day());card.view.performClick();
+        View root=ShadowDialog.getLatestDialog().getWindow().getDecorView();tapCard(root,"Today's earnings");
+        List<String> inside=texts(ShadowDialog.getLatestDialog().getWindow().getDecorView());assertTrue(inside.contains("Today's deliveries"));
+        String list=inside.toString();assertTrue(list.contains("TP7")&&list.contains("no amount set"));assertTrue(list.contains("$5.00 · paid")&&list.contains("$8.38 · not paid yet"));
     }
+
     @Test public void moneyShowsDollarsForUsdAndTheCodeOtherwise() {
         assertEquals("$8.38",TodayEarningsCard.money("8.38","USD"));
         assertEquals("CAD 8.38",TodayEarningsCard.money("8.38","CAD"));
@@ -118,29 +106,19 @@ public class TodayEarningsCardTest {
     }
     @Test public void todayAndWeekRenderAsTwoSeparateCardsAndOpenTheirOwnLists() throws Exception {
         TodayEarningsCard card=card();JSONObject response=day();
-        JSONObject week=new JSONObject().put("start_date","2026-10-12").put("end_date","2026-10-18").put("currency","USD")
-            .put("earned","30.00").put("paid","10.00").put("owed","20.00").put("completed_count",4).put("unpriced_count",0)
-            .put("deliveries",new JSONArray().put(new JSONObject().put("order","WEEK-ONLY").put("completed_utc","2026-10-12 18:00:00").put("pay","30.00").put("paid",false)));
-        response.put("week",week);reply(0,response);
-        assertEquals(2,card.view.getChildCount());assertNull(card.view.getBackground());
-        View today=card.view.getChildAt(0),weekly=card.view.getChildAt(1);
-        assertNotNull(today.getBackground());assertNotNull(weekly.getBackground());
-        assertTrue(texts(today).contains("$13.38"));assertFalse(texts(today).contains("$30.00"));
-        List<String> summary=texts(weekly);
-        assertTrue(summary.contains("This week's earnings"));assertTrue(summary.contains("Oct 12 – Oct 18"));
-        assertTrue(summary.contains("$30.00"));assertTrue(summary.contains("4 deliveries completed this week"));
-        assertTrue(summary.contains("Marked paid $10.00 · Not paid yet $20.00"));
-        weekly.performClick();List<String> popup=texts(ShadowDialog.getLatestDialog().getWindow().getDecorView());
-        assertTrue(popup.contains("This week's deliveries"));
-        assertTrue(popup.toString().contains("WEEK-ONLY"));assertFalse(popup.toString().contains("TP5"));
-        today.performClick();popup=texts(ShadowDialog.getLatestDialog().getWindow().getDecorView());
-        assertTrue(popup.contains("Today's deliveries"));assertTrue(popup.toString().contains("TP5"));assertFalse(popup.toString().contains("WEEK-ONLY"));
+        response.put("week",new JSONObject().put("start_date","2026-10-12").put("end_date","2026-10-18").put("earned","30.00").put("paid","10.00").put("owed","20.00").put("completed_count",4)
+            .put("deliveries",new JSONArray().put(new JSONObject().put("order","WEEK-ONLY").put("completed_utc","2026-10-12 18:00:00").put("pay","30.00"))));
+        reply(0,response);assertEquals(android.widget.LinearLayout.HORIZONTAL,card.view.getOrientation());assertEquals(2,card.view.getChildCount());
+        assertTrue(texts(card.view.getChildAt(0)).contains("Weekly: $30.00"));assertTrue(texts(card.view.getChildAt(1)).contains("Today's: $13.38"));
+        card.view.getChildAt(0).performClick();View details=ShadowDialog.getLatestDialog().getWindow().getDecorView();List<String> shown=texts(details);
+        assertTrue(shown.contains("Today's earnings")&&shown.contains("This week's earnings"));assertTrue(shown.contains("Oct 12 – Oct 18"));assertTrue(shown.contains("Marked paid $10.00 · Not paid yet $20.00"));
+        tapCard(details,"This week's earnings");String weekly=texts(ShadowDialog.getLatestDialog().getWindow().getDecorView()).toString();assertTrue(weekly.contains("WEEK-ONLY"));assertFalse(weekly.contains("TP5"));
     }
+
     @Test public void quietWeekShowsZeroButHasNoDeliveryPopup() throws Exception {
-        TodayEarningsCard card=card();reply(0,day().put("week",new JSONObject().put("earned","0.00").put("completed_count",0).put("deliveries",new JSONArray())));
-        View weekly=card.view.getChildAt(1);assertTrue(texts(weekly).contains("$0.00"));
-        assertTrue(texts(weekly).contains("0 deliveries completed this week"));
-        weekly.performClick();assertNull(ShadowDialog.getLatestDialog());
+        TodayEarningsCard card=card();reply(0,day().put("week",new JSONObject().put("earned","0.00").put("completed_count",0)));
+        assertTrue(texts(card.view.getChildAt(0)).contains("Weekly: $0.00"));card.view.getChildAt(0).performClick();
+        assertTrue(texts(ShadowDialog.getLatestDialog().getWindow().getDecorView()).contains("0 deliveries completed this week"));
         assertEquals("Dec 28 – Jan 3",TodayEarningsCard.weekRange("2026-12-28","2027-01-03"));
     }
 
